@@ -1,0 +1,69 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // ---------------------------
+    // USERS: cada usuario solo lee su doc.
+    // Nadie puede cambiar puntos desde el cliente.
+    // ---------------------------
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid;
+
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        // no permitir cambiar puntos desde el cliente
+        && request.resource.data.points == resource.data.points
+        && request.resource.data.nbaPoints == resource.data.nbaPoints
+        && request.resource.data.nflPoints == resource.data.nflPoints;
+
+      allow delete: if false;
+    }
+
+    // ---------------------------
+    // GAMES: lectura solo para logueados.
+    // Escritura SOLO por server (Functions/Admin).
+    // ---------------------------
+    match /games/{gameId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // ---------------------------
+    // PICKS: user crea/lee sus picks.
+    // No puede marcar scored/correct.
+    // ---------------------------
+    match /picks/{pickId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        // impedir que el cliente marque scored/correct
+        && request.resource.data.scored == resource.data.scored
+        && request.resource.data.correct == resource.data.correct;
+
+      allow delete: if false;
+    }
+
+    // ---------------------------
+    // LEADERBOARDS: lectura para usuarios logueados
+    // (la escritura la hace la Cloud Function con Admin SDK)
+    // ---------------------------
+    match /leaderboards/{lbId} {
+      allow read: if signedIn();
+      allow write: if false;
+
+      match /users/{uid} {
+        allow read: if signedIn();
+        allow write: if false;
+      }
+    }
+  }
+}
