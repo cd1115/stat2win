@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Protected from "@/components/protected";
 import { useAuth } from "@/lib/auth-context";
 import { getWeekId, getWeekRangeLabel } from "@/lib/week";
-import { listenGamesByWeekAndSport, type GameDoc } from "@/lib/firestore-games";
+import { listenGamesByWeekAndSport, type GameDoc, type Sport } from "@/lib/firestore-games";
 import {
   listenMyPicksByWeekAndSport,
   upsertPick,
@@ -147,7 +147,7 @@ function marketLabel(m: MarketTab) {
 
 export default function FutbolTournamentPage() {
   const { user } = useAuth();
-  const sport = "SOCCER" as const;
+ const sport: Sport = "SOCCER"; 
 
   const weekId = getWeekId(new Date());
   const weekLabel = getWeekRangeLabel(new Date(), "es-PR");
