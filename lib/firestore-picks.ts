@@ -11,14 +11,12 @@ import {
   where,
 } from "firebase/firestore";
 
-// ✅ Usa el mismo import que ya tienes en el proyecto
-// (en Stat2Win normalmente es /lib/firebase.ts)
 import { db } from "@/lib/firebase";
+import type { Sport } from "@/lib/firestore-games";
 
 // -----------------------------------------------------------------------------
 // Types
 // -----------------------------------------------------------------------------
-export type Sport = "NBA" | "NFL" | "MLB" | "NHL" | "NCAAB" | string;
 export type Market = "moneyline" | "spread" | "ou";
 export type PickSide = "home" | "away" | "over" | "under";
 export type PickResult = "pending" | "win" | "loss" | "push";
@@ -26,23 +24,19 @@ export type PickResult = "pending" | "win" | "loss" | "push";
 export type PickDoc = {
   id?: string;
 
-  // Identidad
   uid: string;
   sport: Sport;
   weekId: string;
   gameId: string;
 
-  // Pick
   market: Market;
   pick: PickSide;
   selection?: "HOME" | "AWAY" | "OVER" | "UNDER" | null;
   line?: number | null;
 
-  // Display
   username?: string | null;
   displayName?: string | null;
 
-  // Server/scoring
   result?: PickResult;
   pointsAwarded?: number;
   resolvedAt?: any | null;
@@ -58,21 +52,13 @@ function isEpochMs13(v: string) {
   return /^\d{13}$/.test(v);
 }
 
-/**
- * Normaliza gameId para evitar IDs inválidos (por ejemplo un epoch 13-dígitos)
- * y para prevenir docIds con '/'.
- */
 export function normalizeGameId(input: string | number): string {
   const raw = String(input ?? "").trim();
   if (!raw) return "";
 
-  // 13-digit epoch ms => casi seguro es un valor incorrecto
   if (isEpochMs13(raw)) return "";
-
-  // Firestore doc ids no pueden contener '/'
   if (raw.includes("/")) return "";
 
-  // Si por error le pasaron un docId de pick (..._<market>), remover sufijo
   const parts = raw.split("_").filter(Boolean);
   if (parts.length > 1) {
     const last = parts[parts.length - 1];
@@ -89,9 +75,6 @@ export function normalizeGameId(input: string | number): string {
   return raw;
 }
 
-/**
- * 1 pick por uid+sport+weekId+gameId+market
- */
 export function pickDocId(
   uid: string,
   sport: Sport,
@@ -105,10 +88,6 @@ export function pickDocId(
 // -----------------------------------------------------------------------------
 // LISTENER (My Picks)
 // -----------------------------------------------------------------------------
-/**
- * Listener para "My Picks" filtrado por uid + weekId + sport.
- * Nota: NO usamos orderBy para evitar pedir índices.
- */
 export function listenMyPicksByWeekAndSport(
   uid: string,
   weekId: string,
@@ -128,12 +107,12 @@ export function listenMyPicksByWeekAndSport(
     (snap) => {
       const rows: PickDoc[] = snap.docs
         .map((d) => ({ id: d.id, ...(d.data() as any) }))
-        // orden client-side (si existe)
         .sort((a, b) => {
           const at = (a.updatedAt?.toMillis?.() ?? a.createdAt?.toMillis?.() ?? 0) as number;
           const bt = (b.updatedAt?.toMillis?.() ?? b.createdAt?.toMillis?.() ?? 0) as number;
           return bt - at;
         });
+
       onRows(rows);
     },
     (err) => {
@@ -198,7 +177,6 @@ export async function upsertPick(args: {
       {
         ...baseData,
         createdAt: serverTimestamp(),
-        // defaults que suelen esperar tus functions
         result: "pending" as PickResult,
         pointsAwarded: 0,
         resolvedAt: null,
@@ -208,8 +186,6 @@ export async function upsertPick(args: {
     return;
   }
 
-  // Existe: solo actualiza lo editable por el user
-  // (NO sobrescribimos result/pointsAwarded/resolvedAt)
   await setDoc(ref, baseData, { merge: true });
 }
 
