@@ -9,7 +9,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 
-export type Sport = "NBA";
+export type Sport = "NBA" | "NFL" | "SOCCER" | "MLB";
 export type GameStatus = "scheduled" | "inprogress" | "final";
 
 /**
