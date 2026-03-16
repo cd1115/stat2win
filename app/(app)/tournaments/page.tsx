@@ -146,7 +146,7 @@ function TournamentCard({
       <div
         className={[
           "pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300",
-          "bg-gradient-to-br",
+          "bg-[#05070B]",
           ui.overlay,
           "group-hover:opacity-100",
         ].join(" ")}

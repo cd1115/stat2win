@@ -33,10 +33,10 @@ import {
 
 type Market = "moneyline" | "spread" | "ou";
 type ViewTab = "picks" | "performance";
-type SportKey = "NBA" | "NFL";
+type SportKey = "NBA" | "NFL" | "SOCCER" | "MLB";
 type PerfSport = "ALL" | SportKey;
 
-const AVAILABLE_SPORTS: SportKey[] = ["NBA", "NFL",];
+const AVAILABLE_SPORTS: SportKey[] = ["NBA", "NFL", "SOCCER", "MLB"];
 
 const SPORT_META: Record<
   SportKey,
@@ -54,7 +54,23 @@ const SPORT_META: Record<
     accent: "text-emerald-300",
     soft: "bg-emerald-500/10 border-emerald-500/20",
   },
+
+ SOCCER: {
+    label: "SOCCER",
+    emoji: "⚽",
+    accent: "text-green-300",
+    soft: "bg-green-500/10 border-green-500/20",
+  },
+
+  MLB: {
+    label: "MLB",
+    emoji: "⚾",
+    accent: "text-red-300",
+    soft: "bg-red-500/10 border-red-500/20",
+  },
 };
+  
+
 
 type PickDoc = {
   id: string;

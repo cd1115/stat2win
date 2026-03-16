@@ -303,7 +303,13 @@ export default function NflTournamentPage() {
         market: args.market,
         pick: args.pick as any,
         line: args.line,
-        selection: args.selection,
+        selection:
+  args.selection === "HOME" ||
+  args.selection === "AWAY" ||
+  args.selection === "OVER" ||
+  args.selection === "UNDER"
+    ? args.selection
+    : undefined,
       });
     } catch (e: any) {
       setErr(String(e?.message ?? e));
@@ -320,7 +326,13 @@ export default function NflTournamentPage() {
     setErr(null);
 
     try {
-      await deletePickForMarket(user.uid, weekId, sport, gameKey, m);
+      await deletePickForMarket({
+  uid: user.uid,
+  sport,
+  weekId,
+  gameId: gameKey,
+  market: m,
+});
     } catch (e: any) {
       setErr(String(e?.message ?? e));
     } finally {

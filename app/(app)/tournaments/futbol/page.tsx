@@ -269,7 +269,7 @@ export default function FutbolTournamentPage() {
       }
     }
 
-    const key = `${gameKey}:${args.market}`;
+        const key = `${gameKey}:${args.market}`;
     setSavingKey(key);
     setErr(null);
     setNotice(null);
@@ -283,7 +283,15 @@ export default function FutbolTournamentPage() {
         market: args.market,
         pick: args.pick as any,
         line: args.line,
-        selection: args.selection,
+        selection:
+          args.selection === "HOME" ||
+          args.selection === "AWAY" ||
+          args.selection === "OVER" ||
+          args.selection === "UNDER"
+            ? args.selection
+            : undefined,
+        username: user.displayName ?? user.email ?? "",
+        displayName: user.displayName ?? user.email ?? "",
       });
     } catch (e: any) {
       setErr(String(e?.message ?? e));
@@ -300,13 +308,21 @@ export default function FutbolTournamentPage() {
     setErr(null);
 
     try {
-      await deletePickForMarket(user.uid, weekId, sport, gameKey, m);
+      await deletePickForMarket({
+        uid: user.uid,
+        sport,
+        weekId,
+        gameId: gameKey,
+        market: m,
+      });
     } catch (e: any) {
       setErr(String(e?.message ?? e));
     } finally {
       setSavingKey(null);
     }
   }
+
+    
 
   return (
     <Protected>
@@ -636,4 +652,4 @@ export default function FutbolTournamentPage() {
       </div>
     </Protected>
   );
-}
+  }

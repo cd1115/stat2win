@@ -304,7 +304,13 @@ export default function MlbTournamentPage() {
         market: args.market,
         pick: args.pick as any,
         line: args.line,
-        selection: args.selection,
+        selection:
+  args.selection === "HOME" ||
+  args.selection === "AWAY" ||
+  args.selection === "OVER" ||
+  args.selection === "UNDER"
+    ? args.selection
+    : undefined,
       });
     } catch (e: any) {
       setErr(String(e?.message ?? e));
