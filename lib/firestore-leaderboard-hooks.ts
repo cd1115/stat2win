@@ -3,8 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { getWeekId } from "@/lib/week";
-import { listenLeaderboard, type LeaderboardRow } from "@/lib/firestore-leaderboard";
+import {
+  listenLeaderboard,
+  type LeaderboardRow,
+} from "@/lib/firestore-leaderboard";
 import { db } from "@/lib/firebase";
+import type { Sport } from "@/lib/firestore-games";
 
 export type LeaderboardUIRow = LeaderboardRow & {
   username: string;
@@ -16,27 +20,30 @@ type UsernameDoc = {
   photoURL?: string;
 };
 
-async function fetchUsername(uid: string): Promise<{ username: string; photoURL?: string }> {
+async function fetchUsername(
+  uid: string
+): Promise<{ username: string; photoURL?: string }> {
   const snap = await getDoc(doc(db, "usernames", uid));
   if (!snap.exists()) return { username: "—" };
 
   const d = snap.data() as UsernameDoc;
   return {
-    username: (d.username ?? "—").toString(),
+    username: String(d.username ?? "—"),
     photoURL: d.photoURL,
   };
 }
 
-export function useLeaderboard(params?: { weekId?: string; sport?: string }) {
+export function useLeaderboard(params?: { weekId?: string; sport?: Sport }) {
   const weekId = params?.weekId ?? getWeekId();
-  const sport = params?.sport ?? "NBA";
+  const sport: Sport = params?.sport ?? "NBA";
 
   const [data, setData] = useState<LeaderboardUIRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // cache (uid -> {username, photoURL})
-  const cacheRef = useRef<Map<string, { username: string; photoURL?: string }>>(new Map());
+  const cacheRef = useRef<Map<string, { username: string; photoURL?: string }>>(
+    new Map()
+  );
 
   const key = useMemo(() => `${weekId}_${sport}`, [weekId, sport]);
 
@@ -49,12 +56,10 @@ export function useLeaderboard(params?: { weekId?: string; sport?: string }) {
       sport,
       async (rows) => {
         try {
-          // 1) cuál uid falta en cache
           const missing = rows
             .map((r) => r.uid)
             .filter((uid) => uid && !cacheRef.current.has(uid));
 
-          // 2) fetch paralelo solo los que faltan
           if (missing.length > 0) {
             const fetched = await Promise.all(
               missing.map(async (uid) => [uid, await fetchUsername(uid)] as const)
@@ -62,7 +67,6 @@ export function useLeaderboard(params?: { weekId?: string; sport?: string }) {
             fetched.forEach(([uid, u]) => cacheRef.current.set(uid, u));
           }
 
-          // 3) merge final
           const merged: LeaderboardUIRow[] = rows.map((r) => {
             const u = cacheRef.current.get(r.uid);
             return {
@@ -86,7 +90,6 @@ export function useLeaderboard(params?: { weekId?: string; sport?: string }) {
     );
 
     return () => unsub();
-    // key fuerza refresh cuando cambia weekId o sport
   }, [key, weekId, sport]);
 
   return { data, loading, error, weekId, sport };
