@@ -6,13 +6,16 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import type { Sport } from "@/lib/ids";
-import { leaderboardDocId } from "@/lib/ids";
+import type { Sport } from "@/lib/firestore-games";
+
+function leaderboardDocId(weekId: string, sport: Sport) {
+  return `${weekId}_${sport}`;
+}
 
 export type LeaderboardRow = {
   uid: string;
   weekId: string;
-  sport: string;
+  sport: Sport;
   points: number;
 };
 
@@ -37,7 +40,7 @@ export function listenLeaderboard(
         return {
           uid: data.uid ?? d.id,
           weekId: data.weekId ?? weekId,
-          sport: data.sport ?? sport,
+          sport: (data.sport ?? sport) as Sport,
           points: Number(data.points ?? 0),
         };
       });
