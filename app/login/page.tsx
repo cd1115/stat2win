@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
   onAuthStateChanged,
@@ -19,13 +19,13 @@ function Pill({ children }: { children: React.ReactNode }) {
   );
 }
 
-export default function LoginPage() {
+function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const fromLogout = searchParams.get("from") === "logout";
+  const nextParam = searchParams.get("next");
 
-  // ✅ Oculta el mensaje de logout en 10s (limpia el query param)
   useEffect(() => {
     if (!fromLogout) return;
 
@@ -44,7 +44,6 @@ export default function LoginPage() {
   const [checking, setChecking] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // ✅ Si ya está logueado, asegura profile y manda al app
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
@@ -61,13 +60,12 @@ export default function LoginPage() {
           await auth.currentUser?.getIdToken(true);
         } catch {}
 
-        const next = new URLSearchParams(window.location.search).get("next");
-        router.replace(next || "/overview");
+        router.replace(nextParam || "/overview");
       }
     });
 
     return () => unsub();
-  }, [router]);
+  }, [router, nextParam]);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -87,8 +85,7 @@ export default function LoginPage() {
         await auth.currentUser?.getIdToken(true);
       } catch {}
 
-      const next = new URLSearchParams(window.location.search).get("next");
-      router.replace(next || "/overview");
+      router.replace(nextParam || "/overview");
     } catch (error: unknown) {
       const code = (error as { code?: string })?.code;
 
@@ -99,7 +96,7 @@ export default function LoginPage() {
       } else {
         setErr(
           (error as { message?: string })?.message ??
-            "No se pudo iniciar sesión.",
+            "No se pudo iniciar sesión."
         );
       }
     } finally {
@@ -115,18 +112,15 @@ export default function LoginPage() {
     );
   }
 
-  // si ya hay user, no renderiza (porque redirige)
   if (user) return null;
 
   return (
     <div className="min-h-screen relative overflow-hidden">
-      {/* Background (igual que Home) */}
       <div className="absolute inset-0 bg-[#05070B] from-[#070A12] via-[#090B18] to-[#1B1230]" />
       <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 h-[520px] w-[820px] rounded-full bg-blue-500/20 blur-3xl opacity-60" />
       <div className="pointer-events-none absolute -bottom-56 left-20 h-[520px] w-[520px] rounded-full bg-fuchsia-500/15 blur-3xl opacity-50" />
 
       <div className="relative mx-auto max-w-6xl px-6 py-16">
-        {/* Top row */}
         <div className="flex items-center justify-between">
           <Link
             href="/"
@@ -144,7 +138,6 @@ export default function LoginPage() {
         </div>
 
         <div className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
-          {/* Left */}
           <div className="space-y-6">
             <div className="flex flex-wrap gap-2">
               <Pill>No gambling</Pill>
@@ -184,7 +177,6 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Right card */}
           <div className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
             <div className="flex items-center justify-between">
               <div>
@@ -271,5 +263,19 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen grid place-items-center bg-[#05070B]">
+          <div className="text-white/70 text-sm">Loading…</div>
+        </div>
+      }
+    >
+      <LoginPageInner />
+    </Suspense>
   );
 }
