@@ -97,6 +97,7 @@ function extractLinesFromEvent(ev) {
 
   const spreads = dk.markets?.find((m) => m.key === "spreads");
   const totals = dk.markets?.find((m) => m.key === "totals");
+  const h2h = dk.markets?.find((m) => m.key === "h2h");
 
   let spreadHome = null;
   let spreadAway = null;
@@ -104,19 +105,51 @@ function extractLinesFromEvent(ev) {
   if (spreads?.outcomes?.length) {
     const home = spreads.outcomes.find((o) => o.name === ev.home_team);
     const away = spreads.outcomes.find((o) => o.name === ev.away_team);
-    spreadHome = home?.point ?? null;
-    spreadAway = away?.point ?? null;
+    spreadHome = typeof home?.point === "number" ? home.point : null;
+    spreadAway = typeof away?.point === "number" ? away.point : null;
   }
 
   let total = null;
   if (totals?.outcomes?.length) {
-    const over = totals.outcomes.find((o) => o.name.toLowerCase() === "over");
-    total = over?.point ?? null;
+    const over = totals.outcomes.find(
+      (o) => String(o.name).toLowerCase() === "over",
+    );
+    total = typeof over?.point === "number" ? over.point : null;
+
+    if (total === null) {
+      const any = totals.outcomes.find((o) => typeof o.point === "number");
+      total = any?.point ?? null;
+    }
   }
 
-  if (spreadHome === null && spreadAway === null && total === null) return null;
+  let moneylineHome = null;
+  let moneylineAway = null;
 
-  return { spreadHome, spreadAway, total };
+  if (h2h?.outcomes?.length) {
+    const home = h2h.outcomes.find((o) => o.name === ev.home_team);
+    const away = h2h.outcomes.find((o) => o.name === ev.away_team);
+
+    moneylineHome = typeof home?.price === "number" ? home.price : null;
+    moneylineAway = typeof away?.price === "number" ? away.price : null;
+  }
+
+  if (
+    spreadHome === null &&
+    spreadAway === null &&
+    total === null &&
+    moneylineHome === null &&
+    moneylineAway === null
+  ) {
+    return null;
+  }
+
+  return {
+    spreadHome,
+    spreadAway,
+    total,
+    moneylineHome,
+    moneylineAway,
+  };
 }
 
 /* ================= FETCH ODDS ================= */
@@ -128,37 +161,73 @@ async function fetchOdds(apiKey, sportKey) {
       params: {
         apiKey,
         bookmakers: "draftkings",
-        markets: "spreads,totals",
+        markets: "h2h,spreads,totals",
         oddsFormat: "american",
         dateFormat: "iso",
       },
+      timeout: 20000,
     },
   );
+
+  const remaining =
+    res.headers["x-requests-remaining"] ?? res.headers["X-Requests-Remaining"];
+  const used = res.headers["x-requests-used"] ?? res.headers["X-Requests-Used"];
+
+  console.log(
+    `[fetchOdds] ${sportKey} | used=${used ?? "?"} remaining=${remaining ?? "?"}`,
+  );
+
   return res.data;
 }
 
 /* ================= MATCH & UPDATE ================= */
 
 async function updateLeague(league, sportKey, apiKey) {
+  console.log(`\n=== Syncing ${league} (${sportKey}) ===`);
+
   const events = await fetchOdds(apiKey, sportKey);
+
+  let updated = 0;
+  let skippedNoLines = 0;
+  let skippedNoTeams = 0;
+  let noMatch = 0;
 
   for (const ev of events) {
     const lines = extractLinesFromEvent(ev);
-    if (!lines) continue;
+    if (!lines) {
+      skippedNoLines++;
+      continue;
+    }
 
     const home = mapTeam(league, ev.home_team);
     const away = mapTeam(league, ev.away_team);
-    if (!home || !away) continue;
 
-    const snapshot = await db
+    if (!home || !away) {
+      skippedNoTeams++;
+      console.log("Team map missing:", league, ev.home_team, ev.away_team);
+      continue;
+    }
+
+    let snapshot = await db
       .collection("games")
       .where("league", "==", league)
-      .where("homeTeam", "==", home)
-      .where("awayTeam", "==", away)
+      .where("oddsEventId", "==", ev.id)
+      .limit(1)
       .get();
 
     if (snapshot.empty) {
-      console.log("No match:", league, home, away);
+      snapshot = await db
+        .collection("games")
+        .where("league", "==", league)
+        .where("homeTeam", "==", home)
+        .where("awayTeam", "==", away)
+        .limit(1)
+        .get();
+    }
+
+    if (snapshot.empty) {
+      noMatch++;
+      console.log("No match:", league, home, away, "| oddsEventId:", ev.id);
       continue;
     }
 
@@ -166,29 +235,66 @@ async function updateLeague(league, sportKey, apiKey) {
 
     await docRef.set(
       {
+        oddsEventId: ev.id,
         markets: {
-          spread: {
-            homeLine: lines.spreadHome,
-            awayLine: lines.spreadAway,
-          },
-          total: {
-            line: lines.total,
-          },
+          ...(lines.spreadHome !== null || lines.spreadAway !== null
+            ? {
+                spread: {
+                  homeLine: lines.spreadHome,
+                  awayLine: lines.spreadAway,
+                },
+              }
+            : {}),
+          ...(lines.total !== null
+            ? {
+                total: {
+                  line: lines.total,
+                },
+              }
+            : {}),
+          ...(lines.moneylineHome !== null || lines.moneylineAway !== null
+            ? {
+                moneyline: {
+                  home: lines.moneylineHome,
+                  away: lines.moneylineAway,
+                },
+              }
+            : {}),
         },
-        source: "draftkings",
+        source: "oddsapi",
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
       { merge: true },
     );
 
-    console.log("Updated:", league, home, away);
+    updated++;
+    console.log(
+      "Updated:",
+      league,
+      away,
+      "@",
+      home,
+      "| ML:",
+      lines.moneylineAway,
+      lines.moneylineHome,
+      "| SP:",
+      lines.spreadAway,
+      lines.spreadHome,
+      "| OU:",
+      lines.total,
+    );
   }
+
+  console.log(
+    `=== ${league} done | updated=${updated} noMatch=${noMatch} noLines=${skippedNoLines} noTeams=${skippedNoTeams} ===`,
+  );
 }
 
 /* ================= MAIN ================= */
 
 async function run() {
   const apiKey = process.env.ODDS_API_KEY;
+
   if (!apiKey) {
     console.error("Missing ODDS_API_KEY");
     process.exit(1);
@@ -200,4 +306,7 @@ async function run() {
   console.log("DONE");
 }
 
-run().catch(console.error);
+run().catch((err) => {
+  console.error("odds-sync-firestore failed:", err?.response?.data || err);
+  process.exit(1);
+});
