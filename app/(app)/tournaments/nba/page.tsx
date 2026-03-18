@@ -1,5 +1,5 @@
 "use client";
-
+import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Protected from "@/components/protected";
 import { useAuth } from "@/lib/auth-context";
@@ -188,6 +188,39 @@ function teamAbbrFrom(g: any, side: "home" | "away") {
   return v || (side === "home" ? "HOME" : "AWAY");
 }
 
+function TeamLogo({
+  code,
+  size = 40,
+}: {
+  code: string;
+  size?: number;
+}) {
+  const [imgError, setImgError] = useState(false);
+  const safeCode = String(code || "").trim().toUpperCase();
+  const src = `/teams/${safeCode}.png`;
+
+  return (
+    <div
+      className="flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 overflow-hidden"
+      style={{ width: size, height: size }}
+    >
+      {!imgError ? (
+        <Image
+          src={src}
+          alt={safeCode}
+          width={size}
+          height={size}
+          className="h-full w-full object-contain"
+          onError={() => setImgError(true)}
+        />
+      ) : (
+        <span className="text-sm font-semibold text-white">
+          {safeCode.slice(0, 3)}
+        </span>
+      )}
+    </div>
+  );
+}
 type OptimisticPick = Partial<PickDoc> & {
   market: "moneyline" | "spread" | "ou";
   pick: "home" | "away" | "over" | "under";
@@ -687,14 +720,12 @@ export default function NbaTournamentPage() {
           {showOU ? <div className="text-xs font-semibold text-white/60">Total</div> : null}
           {showMoneyline ? <div className="text-xs font-semibold text-white/60">Moneyline</div> : null}
 
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm font-semibold">
-              {String(g.awayTeam ?? "").slice(0, 3)}
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-base font-semibold">{g.awayTeam}</div>
-            </div>
-          </div>
+        <div className="flex items-center gap-3">
+  <TeamLogo code={awayAbbr} />
+  <div className="min-w-0">
+    <div className="truncate text-base font-semibold">{g.awayTeam}</div>
+  </div>
+</div>
 
           {/* AWAY SPREAD */}
           <button
@@ -750,14 +781,11 @@ export default function NbaTournamentPage() {
           </button>
 
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm font-semibold">
-              {String(g.homeTeam ?? "").slice(0, 3)}
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-base font-semibold">{g.homeTeam}</div>
-            </div>
-          </div>
-
+  <TeamLogo code={homeAbbr} />
+  <div className="min-w-0">
+    <div className="truncate text-base font-semibold">{g.homeTeam}</div>
+  </div>
+</div>
           {/* HOME SPREAD */}
           <button
             disabled={!user?.uid || closed || !hasSpreadLine || !gameKey || isSavingSpread}
