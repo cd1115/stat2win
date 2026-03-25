@@ -4,18 +4,9 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Protected from "@/components/protected";
 import { useAuth } from "@/lib/auth-context";
 import { db } from "@/lib/firebase";
-
-import {
-  collection,
-  getDocs,
-  query,
-  where,
-  type DocumentData,
-} from "firebase/firestore";
-
+import { getWeekId, getWeekRangeLabel } from "@/lib/week";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getApp } from "firebase/app";
-
 import {
   ResponsiveContainer,
   LineChart,
@@ -37,6 +28,7 @@ type SportKey = "NBA" | "NFL" | "SOCCER" | "MLB";
 type PerfSport = "ALL" | SportKey;
 
 const AVAILABLE_SPORTS: SportKey[] = ["NBA", "NFL", "SOCCER", "MLB"];
+const NBA_LOGO_BASE = "/teams";
 
 const SPORT_META: Record<
   SportKey,
@@ -54,14 +46,12 @@ const SPORT_META: Record<
     accent: "text-emerald-300",
     soft: "bg-emerald-500/10 border-emerald-500/20",
   },
-
- SOCCER: {
+  SOCCER: {
     label: "SOCCER",
     emoji: "⚽",
     accent: "text-green-300",
     soft: "bg-green-500/10 border-green-500/20",
   },
-
   MLB: {
     label: "MLB",
     emoji: "⚾",
@@ -69,56 +59,48 @@ const SPORT_META: Record<
     soft: "bg-red-500/10 border-red-500/20",
   },
 };
-  
-
 
 type PickDoc = {
   id: string;
-  uid: string;
+  uid?: string;
+  userId?: string;
   weekId: string;
   sport: string;
   gameId: string;
-
+  gameDocId?: string;
   market?: Market;
   pick: "home" | "away" | "over" | "under" | string;
   line?: number | null;
   selection?: "HOME" | "AWAY" | "OVER" | "UNDER" | string;
-
   result?: "pending" | "win" | "loss" | "push";
   pointsAwarded?: number;
-
   createdAt?: any;
   updatedAt?: any;
 };
 
 type GameDoc = {
   id: string;
-
+  gameId?: string;
   homeTeam?: string;
   awayTeam?: string;
   homeTeamAbbr?: string;
   awayTeamAbbr?: string;
   home?: string;
   away?: string;
-
   markets?: {
-    spread?: { line?: number };
+    spread?: { line?: number; homeLine?: number; awayLine?: number };
     total?: { line?: number };
   };
-
   scoreHome?: number;
   scoreAway?: number;
   homeScore?: number;
   awayScore?: number;
-
   status?: string;
   startTime?: any;
   startsAt?: any;
-
   winner?: "home" | "away" | string;
   weekId?: string;
   sport?: string;
-
   [k: string]: any;
 };
 
@@ -152,18 +134,14 @@ function ChartCard({
 
 function safeDate(v: any): Date | null {
   if (!v) return null;
-  if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
-  if (typeof v === "string") {
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
+  if (typeof v === "string" || typeof v === "number") {
     const d = new Date(v);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  if (typeof v === "number") {
-    const d = new Date(v);
-    return isNaN(d.getTime()) ? null : d;
+    return Number.isNaN(d.getTime()) ? null : d;
   }
   if (typeof v?.toDate === "function") {
     const d = v.toDate();
-    return d instanceof Date && !isNaN(d.getTime()) ? d : null;
+    return d instanceof Date && !Number.isNaN(d.getTime()) ? d : null;
   }
   return null;
 }
@@ -178,8 +156,8 @@ function isFinalStatus(status?: string) {
 function getStart(game?: GameDoc): Date | null {
   if (!game) return null;
   return (
-    safeDate(game?.startTime) ||
-    safeDate(game?.startsAt) ||
+    safeDate(game.startTime) ||
+    safeDate(game.startsAt) ||
     safeDate((game as any)?.gameTime) ||
     safeDate((game as any)?.dateTime) ||
     safeDate((game as any)?.scheduled) ||
@@ -194,8 +172,7 @@ function getStart(game?: GameDoc): Date | null {
 
 function isLocked(game?: GameDoc): boolean {
   const start = getStart(game);
-  if (!start) return false;
-  return Date.now() >= start.getTime();
+  return !!start && Date.now() >= start.getTime();
 }
 
 function dayKey(d: Date) {
@@ -212,29 +189,23 @@ function getScores(game?: GameDoc) {
       : typeof game?.homeScore === "number"
         ? game.homeScore
         : null;
-
   const away =
     typeof game?.scoreAway === "number"
       ? game.scoreAway
       : typeof game?.awayScore === "number"
         ? game.awayScore
         : null;
-
   return { home, away };
 }
 
 function resolveWinnerSide(game?: GameDoc): "home" | "away" | null {
-  if (!game) return null;
-  if (!isFinalStatus(game.status)) return null;
-
+  if (!game || !isFinalStatus(game.status)) return null;
   if (game.winner) {
     const w = String(game.winner).toLowerCase();
-    if (w === "home" || w === "away") return w as any;
+    if (w === "home" || w === "away") return w as "home" | "away";
   }
-
   const { home, away } = getScores(game);
   if (home == null || away == null) return null;
-
   if (home > away) return "home";
   if (away > home) return "away";
   return null;
@@ -245,30 +216,22 @@ function resolvePickSide(
   game?: GameDoc,
 ): "home" | "away" | null {
   if (!pickValue) return null;
-
   const v = String(pickValue).toLowerCase();
-  if (v === "home" || v === "away") return v as any;
+  if (v === "home" || v === "away") return v as "home" | "away";
   if (pickValue === "HOME") return "home";
   if (pickValue === "AWAY") return "away";
 
-  const homeTeam = (
-    game?.homeTeamAbbr ||
-    game?.homeTeam ||
-    game?.home ||
-    ""
-  ).toString();
-  const awayTeam = (
-    game?.awayTeamAbbr ||
-    game?.awayTeam ||
-    game?.away ||
-    ""
-  ).toString();
+  const homeTeam = String(
+    game?.homeTeamAbbr || game?.homeTeam || game?.home || "",
+  );
+  const awayTeam = String(
+    game?.awayTeamAbbr || game?.awayTeam || game?.away || "",
+  );
 
   if (homeTeam && String(pickValue).toUpperCase() === homeTeam.toUpperCase())
     return "home";
   if (awayTeam && String(pickValue).toUpperCase() === awayTeam.toUpperCase())
     return "away";
-
   return null;
 }
 
@@ -282,13 +245,15 @@ function inferMarket(p: PickDoc): Market {
 
 function getGameLines(game?: GameDoc) {
   const spreadLine =
-    typeof (game as any)?.markets?.spread?.line === "number"
-      ? (game as any).markets.spread.line
-      : null;
+    typeof game?.markets?.spread?.line === "number"
+      ? game.markets.spread.line
+      : typeof game?.markets?.spread?.homeLine === "number"
+        ? game.markets.spread.homeLine
+        : null;
 
   const totalLine =
-    typeof (game as any)?.markets?.total?.line === "number"
-      ? (game as any).markets.total.line
+    typeof game?.markets?.total?.line === "number"
+      ? game.markets.total.line
       : null;
 
   return { spreadLine, totalLine };
@@ -302,8 +267,7 @@ function resolveOutcome(
   points: number | null;
   won: boolean | null;
 } {
-  if (!game) return { outcome: null, points: null, won: null };
-  if (!isFinalStatus(game.status))
+  if (!game || !isFinalStatus(game.status))
     return { outcome: null, points: null, won: null };
 
   const { home, away } = getScores(game);
@@ -317,7 +281,6 @@ function resolveOutcome(
     const winner = resolveWinnerSide(game);
     const pickSide = resolvePickSide(p.pick, game);
     if (!winner || !pickSide) return { outcome: null, points: null, won: null };
-
     const win = pickSide === winner;
     return { outcome: win ? "win" : "loss", points: win ? 100 : 0, won: win };
   }
@@ -330,25 +293,23 @@ function resolveOutcome(
 
     const homeMargin = home - away;
     const adjustedHome = homeMargin + Number(line);
-
     if (adjustedHome === 0) return { outcome: "push", points: 50, won: null };
 
     const winnerSide = adjustedHome > 0 ? "home" : "away";
     const win = pickSide === winnerSide;
-
     return { outcome: win ? "win" : "loss", points: win ? 100 : 0, won: win };
   }
 
   if (market === "ou") {
     const line = typeof p.line === "number" ? p.line : totalLine;
-    const v = String(p.pick || "").toLowerCase();
-    if (line == null || (v !== "over" && v !== "under"))
+    const v = String(p.pick).toLowerCase();
+    if (line == null || (v !== "over" && v !== "under")) {
       return { outcome: null, points: null, won: null };
+    }
 
     const total = home + away;
     if (total === Number(line))
       return { outcome: "push", points: 50, won: null };
-
     const win = v === "over" ? total > Number(line) : total < Number(line);
     return { outcome: win ? "win" : "loss", points: win ? 100 : 0, won: win };
   }
@@ -357,7 +318,7 @@ function resolveOutcome(
 }
 
 function fmtTime(d: Date | null) {
-  if (!d) return "TBD";
+  if (!d) return "";
   return d.toLocaleString(undefined, {
     weekday: "short",
     month: "short",
@@ -367,9 +328,91 @@ function fmtTime(d: Date | null) {
   });
 }
 
-function teamLabel(s?: string) {
-  const v = String(s || "");
-  return v.length ? v.toUpperCase() : "—";
+function prettyStartLabel(game?: GameDoc, start?: Date | null) {
+  const parsed =
+    start ||
+    safeDate(game?.startTime) ||
+    safeDate(game?.startsAt) ||
+    safeDate((game as any)?.gameTime) ||
+    safeDate((game as any)?.dateTime) ||
+    safeDate((game as any)?.scheduled) ||
+    safeDate((game as any)?.startDateTime) ||
+    safeDate((game as any)?.commenceTime) ||
+    safeDate((game as any)?.startTimeUtc) ||
+    safeDate((game as any)?.startTimeUTC) ||
+    safeDate((game as any)?.start_time) ||
+    null;
+
+  if (parsed) return fmtTime(parsed);
+
+  const status = String(game?.status || "").toUpperCase();
+  if (status) return status;
+
+  return "Scheduled";
+}
+
+function inferOutcomeFromPoints(points?: number | null, final?: boolean) {
+  if (!final || typeof points !== "number") return null;
+  if (points >= 100) return "win" as const;
+  if (points === 50) return "push" as const;
+  if (points === 0) return "loss" as const;
+  return null;
+}
+
+function teamLogoSrc(sport: string, abbr?: string) {
+  if (String(sport).toUpperCase() !== "NBA") return null;
+  const code = String(abbr || "")
+    .trim()
+    .toUpperCase();
+  if (!code) return null;
+
+  return `${NBA_LOGO_BASE}/${code}.png`;
+}
+
+function TeamBadge({
+  sport,
+  abbr,
+  fallback,
+}: {
+  sport: string;
+  abbr?: string;
+  fallback: string;
+}) {
+  const src = teamLogoSrc(sport, abbr);
+  const code = String(abbr || fallback || "")
+    .trim()
+    .toUpperCase();
+
+  return (
+    <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-black/20">
+      {src ? (
+        <img
+          src={src}
+          alt={code}
+          className="h-9 w-9 object-contain"
+          onError={(e) => {
+            const img = e.currentTarget;
+            img.style.display = "none";
+            const fallbackEl = img.nextElementSibling as HTMLElement | null;
+            if (fallbackEl) fallbackEl.style.display = "flex";
+          }}
+        />
+      ) : null}
+
+      <div
+        className="h-9 w-9 items-center justify-center rounded-xl bg-white/5 text-xs font-semibold text-white/70"
+        style={{ display: src ? "none" : "flex" }}
+      >
+        {code.slice(0, 3)}
+      </div>
+    </div>
+  );
+}
+
+function teamLabel(v?: string | null) {
+  if (!v) return "";
+  const s = String(v).toUpperCase();
+  return s.length > 3 ? s.slice(0, 3) : s;
 }
 
 function pickText(p: PickDoc, g?: GameDoc) {
@@ -387,13 +430,13 @@ function pickText(p: PickDoc, g?: GameDoc) {
 
   if (market === "spread") {
     const side = resolvePickSide(p.pick, g);
-    const t =
+    const team =
       side === "home"
         ? teamLabel(g?.homeTeamAbbr || g?.homeTeam || g?.home)
         : teamLabel(g?.awayTeamAbbr || g?.awayTeam || g?.away);
     return line != null
-      ? `${t} ${line > 0 ? "+" : ""}${line}`
-      : `${t} (spread)`;
+      ? `${team} ${line > 0 ? "+" : ""}${line}`
+      : `${team} (spread)`;
   }
 
   if (market === "ou") {
@@ -401,95 +444,24 @@ function pickText(p: PickDoc, g?: GameDoc) {
     if (v === "over" || v === "under") {
       return line != null ? `${v.toUpperCase()} ${line}` : v.toUpperCase();
     }
-    return String(p.pick);
   }
 
   return String(p.pick);
 }
 
-function getWeekId(date: Date) {
-  const d = new Date(
-    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()),
-  );
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil(
-    ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7,
-  );
-  const w = String(weekNo).padStart(2, "0");
-  return `${d.getUTCFullYear()}-W${w}`;
-}
-
-async function fetchPicksForUser(uid: string, weekId: string, sport: SportKey) {
-  const picksRef = collection(db, "picks");
-  const q = query(
-    picksRef,
-    where("uid", "==", uid),
-    where("weekId", "==", weekId),
-    where("sport", "==", sport),
-  );
-
-  const snap = await getDocs(q);
-  const out: PickDoc[] = [];
-
-  snap.forEach((d) => {
-    const data = d.data() as any;
-    out.push({
-      id: d.id,
-      uid: data.uid,
-      weekId: data.weekId,
-      sport: data.sport,
-      gameId: String(data.gameId),
-      market: data.market,
-      pick: data.pick,
-      line: typeof data.line === "number" ? data.line : null,
-      selection: data.selection,
-      result: data.result,
-      pointsAwarded:
-        typeof data.pointsAwarded === "number" ? data.pointsAwarded : undefined,
-      createdAt: data.createdAt,
-      updatedAt: data.updatedAt,
-    });
-  });
-
-  return out;
-}
-
-async function fetchGamesForWeek(weekId: string, sport: SportKey) {
-  const gamesRef = collection(db, "games");
-  const q = query(
-    gamesRef,
-    where("weekId", "==", weekId),
-    where("sport", "==", sport),
-  );
-
-  const snap = await getDocs(q);
-  const out: GameDoc[] = [];
-
-  snap.forEach((d) => {
-    const data = d.data() as DocumentData;
-    out.push({ id: d.id, ...(data as any) });
-  });
-
-  return out;
-}
-
 async function fetchWeekBundle(uid: string, weekId: string) {
-  const results = await Promise.all(
-    AVAILABLE_SPORTS.map(async (sport) => {
-      const [sportPicks, sportGames] = await Promise.all([
-        fetchPicksForUser(uid, weekId, sport),
-        fetchGamesForWeek(weekId, sport),
-      ]);
+  const functions = getFunctions(getApp());
 
-      return { sport, sportPicks, sportGames };
-    }),
-  );
+  const callable = httpsCallable<
+    { weekId: string },
+    { ok: boolean; weekId: string; picks: PickDoc[]; games: GameDoc[] }
+  >(functions, "getMyPicksWeek");
+
+  const res = await callable({ weekId });
 
   return {
-    picks: results.flatMap((x) => x.sportPicks),
-    games: results.flatMap((x) => x.sportGames),
+    picks: Array.isArray(res.data?.picks) ? res.data.picks : [],
+    games: Array.isArray(res.data?.games) ? res.data.games : [],
   };
 }
 
@@ -498,28 +470,36 @@ export default function PicksPage() {
 
   const [viewTab, setViewTab] = useState<ViewTab>("picks");
   const [perfSport, setPerfSport] = useState<PerfSport>("ALL");
-  const [weekId] = useState(() => getWeekId(new Date()));
-
+  const [weekOffset, setWeekOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [picks, setPicks] = useState<PickDoc[]>([]);
   const [games, setGames] = useState<GameDoc[]>([]);
-
   const [search, setSearch] = useState("");
+  const [err, setErr] = useState<string | null>(null);
 
-  const [editingPick, setEditingPick] = useState<PickDoc | null>(null);
-  const [editValue, setEditValue] = useState<string>("");
-  const [saving, setSaving] = useState(false);
+  const weekDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + weekOffset * 7);
+    return d;
+  }, [weekOffset]);
 
-  const functions = getFunctions(getApp());
+  const weekId = useMemo(() => getWeekId(weekDate), [weekDate]);
+  const weekLabel = useMemo(
+    () => getWeekRangeLabel(weekDate, "es-PR"),
+    [weekDate],
+  );
 
   const refresh = async () => {
     if (!user?.uid) return;
-
     setLoading(true);
+    setErr(null);
     try {
       const bundle = await fetchWeekBundle(user.uid, weekId);
       setPicks(bundle.picks);
       setGames(bundle.games);
+    } catch (e: any) {
+      console.error("My Picks refresh error:", e);
+      setErr(e?.message ?? "Could not load picks.");
     } finally {
       setLoading(false);
     }
@@ -531,11 +511,15 @@ export default function PicksPage() {
 
     (async () => {
       setLoading(true);
+      setErr(null);
       try {
         const bundle = await fetchWeekBundle(user.uid, weekId);
         if (!alive) return;
         setPicks(bundle.picks);
         setGames(bundle.games);
+      } catch (e: any) {
+        console.error("My Picks load error:", e);
+        if (alive) setErr(e?.message ?? "Could not load picks.");
       } finally {
         if (alive) setLoading(false);
       }
@@ -547,21 +531,48 @@ export default function PicksPage() {
   }, [user?.uid, weekId]);
 
   const gamesById = useMemo(() => {
-    const m: Record<string, GameDoc> = {};
+    const map: Record<string, GameDoc> = {};
     for (const g of games) {
-      const k = String((g as any).gameId ?? g.id);
-      m[k] = g;
+      const keys = [
+        String(g.gameId ?? ""),
+        String(g.id ?? ""),
+        String((g as any).oddsEventId ?? ""),
+        String((g as any).matchKey ?? ""),
+        String((g as any).legacyMatchKey ?? ""),
+      ].filter(Boolean);
+
+      for (const k of keys) map[k] = g;
     }
-    return m;
+    return map;
   }, [games]);
 
   const enriched = useMemo(() => {
     return picks.map((p) => {
-      const g = gamesById[p.gameId];
+      const g =
+        gamesById[p.gameId] ||
+        (p.gameDocId ? gamesById[p.gameDocId] : undefined);
+
+      const computed = resolveOutcome(p, g);
+      const final =
+        p.result && p.result !== "pending" ? true : isFinalStatus(g?.status);
+      const storedOutcome =
+        p.result && p.result !== "pending" ? p.result : null;
+      const outcome =
+        storedOutcome ??
+        computed.outcome ??
+        inferOutcomeFromPoints(p.pointsAwarded, final);
+
+      const points =
+        outcome === "win"
+          ? 100
+          : outcome === "loss"
+            ? 0
+            : outcome === "push"
+              ? 50
+              : (computed.points ??
+                (typeof p.pointsAwarded === "number" ? p.pointsAwarded : null));
       const start = getStart(g);
       const locked = isLocked(g);
-      const { outcome, won, points } = resolveOutcome(p, g);
-      const final = isFinalStatus(g?.status);
       const text = pickText(p, g);
 
       return {
@@ -571,7 +582,7 @@ export default function PicksPage() {
         locked,
         points,
         final,
-        won,
+        won: outcome === "win" ? true : outcome === "loss" ? false : null,
         outcome,
         text,
         sport: String(p.sport || "").toUpperCase(),
@@ -581,22 +592,17 @@ export default function PicksPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const base = enriched;
+    if (!q) return enriched;
 
-    if (!q) return base;
-
-    return base.filter((r) => {
+    return enriched.filter((r) => {
       const ht = String(
         r.game?.homeTeamAbbr || r.game?.homeTeam || r.game?.home || "",
       ).toLowerCase();
-
       const at = String(
         r.game?.awayTeamAbbr || r.game?.awayTeam || r.game?.away || "",
       ).toLowerCase();
-
       const txt = String(r.text || "").toLowerCase();
       const sport = String(r.pick.sport || "").toLowerCase();
-
       return (
         ht.includes(q) ||
         at.includes(q) ||
@@ -608,16 +614,53 @@ export default function PicksPage() {
   }, [enriched, search]);
 
   const groupedPicks = useMemo(() => {
-    const grouped = new Map<string, typeof filtered>();
+    const sportMap = new Map<
+      string,
+      Map<
+        string,
+        {
+          sport: string;
+          game: GameDoc | undefined;
+          start: Date | null;
+          rows: typeof filtered;
+          status: string;
+        }
+      >
+    >();
 
     for (const row of filtered) {
       const sport = String(row.pick.sport || "OTHER").toUpperCase();
-      const current = grouped.get(sport) || [];
-      current.push(row);
-      grouped.set(sport, current);
+      const gameKey =
+        String(
+          row.pick.gameDocId ||
+            row.pick.gameId ||
+            row.game?.id ||
+            row.game?.gameId ||
+            `${sport}-${row.pick.id}`,
+        ) || `${sport}-${row.pick.id}`;
+
+      if (!sportMap.has(sport)) {
+        sportMap.set(sport, new Map());
+      }
+
+      const gameMap = sportMap.get(sport)!;
+      const current = gameMap.get(gameKey) || {
+        sport,
+        game: row.game,
+        start: row.start ?? null,
+        rows: [],
+        status: String(row.game?.status || ""),
+      };
+
+      current.rows.push(row);
+      if (!current.game && row.game) current.game = row.game;
+      if (!current.start && row.start) current.start = row.start;
+      if (!current.status && row.game?.status)
+        current.status = String(row.game.status);
+      gameMap.set(gameKey, current);
     }
 
-    return Array.from(grouped.entries())
+    return Array.from(sportMap.entries())
       .sort((a, b) => {
         const aIdx = AVAILABLE_SPORTS.indexOf(a[0] as SportKey);
         const bIdx = AVAILABLE_SPORTS.indexOf(b[0] as SportKey);
@@ -626,11 +669,26 @@ export default function PicksPage() {
         if (bIdx === -1) return -1;
         return aIdx - bIdx;
       })
-      .map(([sport, rows]) => ({
+      .map(([sport, gameMap]) => ({
         sport,
-        rows: [...rows].sort(
-          (a, b) => (a.start?.getTime() ?? 0) - (b.start?.getTime() ?? 0),
-        ),
+        groups: Array.from(gameMap.values())
+          .map((group) => ({
+            ...group,
+            rows: [...group.rows].sort((a, b) => {
+              const order = { moneyline: 0, spread: 1, ou: 2 } as Record<
+                string,
+                number
+              >;
+              return (
+                (order[inferMarket(a.pick)] ?? 9) -
+                  (order[inferMarket(b.pick)] ?? 9) ||
+                (a.start?.getTime() ?? 0) - (b.start?.getTime() ?? 0)
+              );
+            }),
+          }))
+          .sort(
+            (a, b) => (a.start?.getTime() ?? 0) - (b.start?.getTime() ?? 0),
+          ),
       }));
   }, [filtered]);
 
@@ -645,8 +703,7 @@ export default function PicksPage() {
     const finals = perfBase
       .filter(
         (r) =>
-          r.final &&
-          (r.outcome === "win" || r.outcome === "loss" || r.outcome === "push"),
+          r.outcome === "win" || r.outcome === "loss" || r.outcome === "push",
       )
       .sort((a, b) => (a.start?.getTime() ?? 0) - (b.start?.getTime() ?? 0));
 
@@ -654,12 +711,10 @@ export default function PicksPage() {
     const wins = finals.filter((r) => r.outcome === "win").length;
     const losses = finals.filter((r) => r.outcome === "loss").length;
     const pushes = finals.filter((r) => r.outcome === "push").length;
-
     const points = finals.reduce((acc, r) => acc + (r.points ?? 0), 0);
     const avgPoints = totalFinals
       ? Math.round((points / totalFinals) * 10) / 10
       : 0;
-
     const decided = wins + losses;
     const winRate = decided ? Math.round((wins / decided) * 100) : 0;
 
@@ -697,7 +752,6 @@ export default function PicksPage() {
       if (r.outcome === "win") cur.wins += 1;
       else if (r.outcome === "loss") cur.losses += 1;
       else cur.pushes += 1;
-
       cur.points += r.points ?? 0;
       byDay.set(k, cur);
     }
@@ -705,15 +759,15 @@ export default function PicksPage() {
     const daySeries = Array.from(byDay.values())
       .filter((x) => x.date !== "TBD")
       .sort((a, b) => a.date.localeCompare(b.date))
-      .map((x) => {
-        const decidedDay = x.wins + x.losses;
-        return {
-          date: x.date.slice(5),
-          winRate: decidedDay ? Math.round((x.wins / decidedDay) * 100) : 0,
-          points: x.points,
-          finals: x.finals,
-        };
-      });
+      .map((x) => ({
+        date: x.date.slice(5),
+        winRate:
+          x.wins + x.losses
+            ? Math.round((x.wins / (x.wins + x.losses)) * 100)
+            : 0,
+        points: x.points,
+        finals: x.finals,
+      }));
 
     return {
       totalFinals,
@@ -729,51 +783,13 @@ export default function PicksPage() {
   }, [perfBase]);
 
   const pieData = useMemo(() => {
-    const wins = perf?.wins ?? 0;
-    const losses = perf?.losses ?? 0;
-    const pushes = perf?.pushes ?? 0;
-
     const arr = [
-      { name: "Wins", value: wins },
-      { name: "Losses", value: losses },
-      { name: "Push", value: pushes },
+      { name: "Wins", value: perf.wins },
+      { name: "Losses", value: perf.losses },
+      { name: "Push", value: perf.pushes },
     ];
-
     return arr.filter((x) => x.value > 0);
   }, [perf]);
-
-  const openEdit = (p: PickDoc) => {
-    setEditingPick(p);
-    setEditValue(String(p.pick ?? ""));
-  };
-
-  const closeEdit = () => {
-    setEditingPick(null);
-    setEditValue("");
-  };
-
-  const saveEdit = async () => {
-    if (!editingPick || !user?.uid) return;
-
-    setSaving(true);
-    try {
-      const fn = httpsCallable(functions, "updatePick");
-      await fn({
-        pickId: editingPick.id,
-        uid: user.uid,
-        pick: editValue,
-      });
-      closeEdit();
-      await refresh();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const setTab = (tab: ViewTab) => {
-    setViewTab(tab);
-    if (tab === "performance") setSearch("");
-  };
 
   return (
     <Protected>
@@ -784,12 +800,12 @@ export default function PicksPage() {
               <div className="min-w-0">
                 <h1 className="text-3xl font-semibold text-white">My Picks</h1>
                 <p className="mt-1 text-white/60">
-                  All your picks for the week, grouped by sport.
+                  All your picks for the selected week, grouped by game.
                 </p>
 
                 <div className="mt-4 flex items-center gap-2">
                   <button
-                    onClick={() => setTab("picks")}
+                    onClick={() => setViewTab("picks")}
                     className={`rounded-xl px-4 py-2 text-sm ${
                       viewTab === "picks"
                         ? "bg-white/10 text-white"
@@ -799,7 +815,7 @@ export default function PicksPage() {
                     Picks
                   </button>
                   <button
-                    onClick={() => setTab("performance")}
+                    onClick={() => setViewTab("performance")}
                     className={`rounded-xl px-4 py-2 text-sm ${
                       viewTab === "performance"
                         ? "bg-white/10 text-white"
@@ -812,13 +828,39 @@ export default function PicksPage() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => setWeekOffset((v) => v - 1)}
+                  className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/80 hover:bg-white/5"
+                >
+                  ← Prev
+                </button>
+                <button
+                  onClick={() => setWeekOffset(0)}
+                  className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/80 hover:bg-white/5"
+                >
+                  Current
+                </button>
+                <button
+                  onClick={() => setWeekOffset((v) => v + 1)}
+                  className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/80 hover:bg-white/5"
+                >
+                  Next →
+                </button>
                 <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white/80">
                   Week <span className="ml-2 text-white">{weekId}</span>
                 </div>
               </div>
             </div>
+
+            <div className="mt-3 text-sm text-white/50">{weekLabel}</div>
           </div>
         </Card>
+
+        {err ? (
+          <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {err}
+          </div>
+        ) : null}
 
         <div className="mt-6">
           {viewTab === "picks" ? (
@@ -832,9 +874,12 @@ export default function PicksPage() {
                       </div>
 
                       {!loading &&
-                        groupedPicks.map(({ sport, rows }) => {
-                          const meta =
-                            SPORT_META[sport as SportKey] ?? null;
+                        groupedPicks.map(({ sport, groups }) => {
+                          const meta = SPORT_META[sport as SportKey] ?? null;
+                          const picksCount = groups.reduce(
+                            (acc, group) => acc + group.rows.length,
+                            0,
+                          );
 
                           return (
                             <div
@@ -843,12 +888,14 @@ export default function PicksPage() {
                                 meta?.soft ?? "border-white/10 bg-black/20"
                               }`}
                             >
-                              <span className="mr-2">{meta?.emoji ?? "🎯"}</span>
+                              <span className="mr-2">
+                                {meta?.emoji ?? "🎯"}
+                              </span>
                               <span className="font-medium">
                                 {meta?.label ?? sport}
                               </span>
                               <span className="ml-2 text-white/50">
-                                {rows.length}
+                                {picksCount}
                               </span>
                             </div>
                           );
@@ -873,7 +920,7 @@ export default function PicksPage() {
                 </div>
               </Card>
 
-              <div className="mt-6 space-y-6">
+              <div className="mt-6 space-y-5">
                 {groupedPicks.length === 0 && !loading ? (
                   <Card>
                     <div className="p-6 text-sm text-white/60">
@@ -882,9 +929,8 @@ export default function PicksPage() {
                   </Card>
                 ) : null}
 
-                {groupedPicks.map(({ sport, rows }) => {
+                {groupedPicks.map(({ sport, groups }) => {
                   const meta = SPORT_META[sport as SportKey];
-
                   return (
                     <div key={sport} className="space-y-4">
                       <div className="flex items-center justify-between">
@@ -900,35 +946,94 @@ export default function PicksPage() {
                             </span>
                           </div>
                           <div className="text-sm text-white/45">
-                            {rows.length} pick(s)
+                            {groups.reduce((acc, g) => acc + g.rows.length, 0)}{" "}
+                            pick(s)
                           </div>
                         </div>
                       </div>
 
-                      {rows.map((row) => {
-                        const g = row.game;
-                        const pick = row.pick;
-
+                      {groups.map((group) => {
+                        const g = group.game;
                         const ht = teamLabel(
                           g?.homeTeamAbbr || g?.homeTeam || g?.home,
                         );
                         const at = teamLabel(
                           g?.awayTeamAbbr || g?.awayTeam || g?.away,
                         );
-
+                        const homeAbbr = teamLabel(
+                          g?.homeTeamAbbr || g?.homeTeam || g?.home,
+                        );
+                        const awayAbbr = teamLabel(
+                          g?.awayTeamAbbr || g?.awayTeam || g?.away,
+                        );
                         const status = String(g?.status || "").toLowerCase();
-                        const final = isFinalStatus(g?.status);
+
+                        const normalized = group.rows.map((row) => {
+                          const inferredOutcome =
+                            row.outcome ??
+                            (row.final
+                              ? (row.points ?? 0) > 0
+                                ? "win"
+                                : (row.points ?? 0) === 50
+                                  ? "push"
+                                  : "loss"
+                              : null);
+
+                          return {
+                            ...row,
+                            normalizedOutcome: inferredOutcome,
+                          };
+                        });
+
+                        const hasLoss = normalized.some(
+                          (r) => r.normalizedOutcome === "loss",
+                        );
+                        const hasPending = normalized.some(
+                          (r) => !r.normalizedOutcome,
+                        );
+                        const hasWin = normalized.some(
+                          (r) => r.normalizedOutcome === "win",
+                        );
+                        const hasPush = normalized.some(
+                          (r) => r.normalizedOutcome === "push",
+                        );
+
+                        const cardTone =
+                          hasWin && hasLoss
+                            ? "mixed"
+                            : hasWin
+                              ? "win"
+                              : hasLoss
+                                ? "loss"
+                                : hasPush
+                                  ? "push"
+                                  : "pending";
 
                         return (
-                          <Card key={pick.id}>
+                          <div
+                            key={`${sport}-${group.rows[0]?.pick.id ?? "group"}`}
+                            className={[
+                              "rounded-3xl border bg-white/[0.04] backdrop-blur-xl transition",
+                              cardTone === "win"
+                                ? "border-emerald-500/30 shadow-[0_0_0_1px_rgba(16,185,129,0.10),0_0_24px_rgba(16,185,129,0.10)]"
+                                : cardTone === "loss"
+                                  ? "border-red-500/30 shadow-[0_0_0_1px_rgba(239,68,68,0.10),0_0_24px_rgba(239,68,68,0.10)]"
+                                  : cardTone === "push"
+                                    ? "border-yellow-500/30 shadow-[0_0_0_1px_rgba(250,204,21,0.10),0_0_24px_rgba(250,204,21,0.08)]"
+                                    : cardTone === "mixed"
+                                      ? "border-slate-400/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.05),rgba(239,68,68,0.05))] shadow-[0_0_0_1px_rgba(148,163,184,0.08)]"
+                                      : "border-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]",
+                            ].join(" ")}
+                          >
                             <div className="p-5 md:p-6">
-                              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                                <div className="min-w-0">
+                              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                <div className="min-w-0 flex-1">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-white/80">
-                                      {final ? "Final" : status || "scheduled"}
+                                      {isFinalStatus(g?.status)
+                                        ? "Final"
+                                        : status || "scheduled"}
                                     </span>
-
                                     <span
                                       className={`rounded-full border px-3 py-1 text-xs ${
                                         meta?.soft ??
@@ -937,66 +1042,123 @@ export default function PicksPage() {
                                     >
                                       {meta?.label ?? sport}
                                     </span>
-
-                                    {row.locked ? (
+                                    {group.rows.some((r) => r.locked) ? (
                                       <span className="rounded-full border border-yellow-500/30 bg-yellow-500/10 px-3 py-1 text-xs text-yellow-200">
                                         Locked
                                       </span>
                                     ) : null}
                                   </div>
 
-                                  <div className="mt-3 text-xl font-semibold text-white">
-                                    {at} @ {ht}
-                                  </div>
-
-                                  <div className="mt-1 text-sm text-white/60">
-                                    {fmtTime(row.start)} • {pick.weekId}
-                                  </div>
-
-                                  {row.locked ? (
-                                    <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/60">
-                                      Picks are locked because the game has
-                                      started.
+                                  <div className="mt-4 flex flex-wrap items-center gap-3 text-xl font-semibold text-white">
+                                    <div className="flex items-center gap-3">
+                                      <TeamBadge
+                                        sport={sport}
+                                        abbr={awayAbbr}
+                                        fallback={awayAbbr}
+                                      />
+                                      <span>{at}</span>
                                     </div>
-                                  ) : null}
+                                    <span className="text-white/35">@</span>
+                                    <div className="flex items-center gap-3">
+                                      <TeamBadge
+                                        sport={sport}
+                                        abbr={homeAbbr}
+                                        fallback={homeAbbr}
+                                      />
+                                      <span>{ht}</span>
+                                    </div>
+                                  </div>
+
+                                  <div className="mt-2 text-sm text-white/60">
+                                    {prettyStartLabel(g, group.start)}
+                                    {g?.status &&
+                                    prettyStartLabel(g, group.start) !==
+                                      String(g.status).toUpperCase()
+                                      ? ` • ${String(g.status).toUpperCase()}`
+                                      : ""}
+                                  </div>
                                 </div>
 
-                                <div className="flex shrink-0 flex-col items-end gap-2">
-                                  <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-right">
-                                    <div className="text-xs text-white/60">
-                                      Your pick
-                                    </div>
-                                    <div className="text-base font-semibold text-white">
-                                      {row.text}
-                                    </div>
-                                  </div>
+                                <div className="w-full lg:w-[320px]">
+                                  <div className="flex flex-col gap-2">
+                                    {normalized.map((row) => {
+                                      const tone = row.normalizedOutcome;
+                                      return (
+                                        <div
+                                          key={row.pick.id}
+                                          className={`rounded-2xl border px-4 py-3 ${
+                                            tone === "win"
+                                              ? "border-emerald-500/20 bg-emerald-500/5"
+                                              : tone === "loss"
+                                                ? "border-red-500/20 bg-red-500/5"
+                                                : tone === "push"
+                                                  ? "border-yellow-500/20 bg-yellow-500/5"
+                                                  : "border-white/10 bg-black/20"
+                                          }`}
+                                        >
+                                          <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                              <div className="text-xs text-white/60">
+                                                Your pick
+                                              </div>
+                                              <div className="truncate text-[1.05rem] font-semibold text-white">
+                                                {row.text}
+                                              </div>
+                                            </div>
 
-                                  <div className="flex items-center gap-2">
-                                    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-center">
-                                      <div className="text-xs text-white/60">
-                                        Points
-                                      </div>
-                                      <div className="text-base font-semibold text-white">
-                                        {row.points ?? "—"}
-                                      </div>
-                                    </div>
+                                            <div
+                                              className={`inline-flex min-w-[72px] items-center justify-center rounded-xl px-3 py-1 text-sm font-semibold ${
+                                                tone === "win"
+                                                  ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
+                                                  : tone === "loss"
+                                                    ? "bg-red-500/10 text-red-300 border border-red-500/20"
+                                                    : tone === "push"
+                                                      ? "bg-yellow-500/10 text-yellow-200 border border-yellow-500/20"
+                                                      : row.final
+                                                        ? "bg-white/5 text-white border border-white/10"
+                                                        : "bg-white/5 text-white border border-white/10"
+                                              }`}
+                                            >
+                                              {tone
+                                                ? tone.toUpperCase()
+                                                : row.final
+                                                  ? "FINAL"
+                                                  : "PENDING"}
+                                            </div>
+                                          </div>
 
-                                    <button
-                                      disabled={row.locked}
-                                      onClick={() => openEdit(pick)}
-                                      className={`rounded-2xl border px-4 py-3 text-sm ${
-                                        row.locked
-                                          ? "cursor-not-allowed border-white/10 bg-white/5 text-white/40"
-                                          : "border-white/15 bg-white/10 text-white hover:bg-white/15"
-                                      }`}
-                                    >
-                                      Change pick
-                                    </button>
+                                          <div className="mt-2 grid grid-cols-2 gap-2">
+                                            <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-center">
+                                              <div className="text-[11px] text-white/60">
+                                                Points
+                                              </div>
+                                              <div className="text-lg font-semibold text-white">
+                                                {row.points ?? "—"}
+                                              </div>
+                                            </div>
+                                            <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-center">
+                                              <div className="text-[11px] text-white/60">
+                                                Market
+                                              </div>
+                                              <div className="text-sm font-semibold text-white uppercase">
+                                                {inferMarket(row.pick) ===
+                                                "moneyline"
+                                                  ? "ML"
+                                                  : inferMarket(row.pick) ===
+                                                      "spread"
+                                                    ? "SPREAD"
+                                                    : "OU"}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
                                   </div>
                                 </div>
                               </div>
                             </div>
-                          </Card>
+                          </div>
                         );
                       })}
                     </div>
@@ -1014,7 +1176,7 @@ export default function PicksPage() {
                         Performance
                       </div>
                       <div className="mt-1 text-sm text-white/60">
-                        Based on FINAL games — Week {weekId}
+                        Based on resolved picks — Week {weekId}
                       </div>
                     </div>
 
@@ -1046,11 +1208,10 @@ export default function PicksPage() {
                         {perf.winRate}%
                       </div>
                       <div className="mt-1 text-xs text-white/40">
-                        {perf.wins}-{perf.losses}-{perf.pushes} (finals:{" "}
+                        {perf.wins}-{perf.losses}-{perf.pushes} (resolved:{" "}
                         {perf.totalFinals})
                       </div>
                     </div>
-
                     <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
                       <div className="text-xs text-white/60">Streak</div>
                       <div className="mt-1 text-2xl font-semibold text-white">
@@ -1060,31 +1221,27 @@ export default function PicksPage() {
                         Consecutive wins
                       </div>
                     </div>
-
                     <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
                       <div className="text-xs text-white/60">Points</div>
                       <div className="mt-1 text-2xl font-semibold text-white">
                         {perf.points}
                       </div>
                       <div className="mt-1 text-xs text-white/40">
-                        Avg: {perf.avgPoints}/final pick
+                        Avg: {perf.avgPoints}/resolved pick
                       </div>
                     </div>
-
                     <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
                       <div className="text-xs text-white/60">Wins</div>
                       <div className="mt-1 text-2xl font-semibold text-green-400">
                         {perf.wins}
                       </div>
                     </div>
-
                     <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
                       <div className="text-xs text-white/60">Losses</div>
                       <div className="mt-1 text-2xl font-semibold text-red-400">
                         {perf.losses}
                       </div>
                     </div>
-
                     <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
                       <div className="text-xs text-white/60">Pushes</div>
                       <div className="mt-1 text-2xl font-semibold text-yellow-300">
@@ -1095,8 +1252,8 @@ export default function PicksPage() {
 
                   {perf.totalFinals === 0 ? (
                     <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/60">
-                      No FINAL games yet. Once games finish, charts will
-                      populate automatically.
+                      No resolved picks yet for this filter. Once picks settle,
+                      charts will populate automatically.
                     </div>
                   ) : null}
                 </div>
@@ -1106,7 +1263,7 @@ export default function PicksPage() {
                 <div className="md:col-span-6">
                   <ChartCard
                     title="Win rate by day"
-                    subtitle="Only days with at least 1 final game"
+                    subtitle="Only days with at least 1 resolved pick"
                   >
                     <div className="h-[220px]">
                       <ResponsiveContainer width="100%" height="100%">
@@ -1137,7 +1294,7 @@ export default function PicksPage() {
                 <div className="md:col-span-6">
                   <ChartCard
                     title="Points by day"
-                    subtitle="Total points earned per day (final games)"
+                    subtitle="Total points earned per day (resolved picks)"
                   >
                     <div className="h-[220px]">
                       <ResponsiveContainer width="100%" height="100%">
@@ -1165,7 +1322,7 @@ export default function PicksPage() {
                       Wins vs Losses
                     </div>
                     <div className="mt-1 text-xs text-white/60">
-                      Distribution for finished games
+                      Distribution for resolved picks
                     </div>
 
                     <div className="mt-4 h-[260px]">
@@ -1232,45 +1389,6 @@ export default function PicksPage() {
             </>
           )}
         </div>
-
-        {editingPick ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-            <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#0b0b12] p-5 shadow-xl">
-              <div className="text-lg font-semibold text-white">
-                Change pick
-              </div>
-              <div className="mt-1 text-sm text-white/60">
-                Enter your new selection (home/away/over/under or team).
-              </div>
-
-              <input
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                className="mt-4 w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none"
-              />
-
-              <div className="mt-4 flex items-center justify-end gap-2">
-                <button
-                  onClick={closeEdit}
-                  className="rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white/80 hover:bg-white/10"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={saveEdit}
-                  disabled={saving}
-                  className={`rounded-2xl px-4 py-2 text-sm ${
-                    saving
-                      ? "cursor-not-allowed bg-white/10 text-white/50"
-                      : "bg-white/15 text-white hover:bg-white/20"
-                  }`}
-                >
-                  {saving ? "Saving..." : "Confirm"}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
       </div>
     </Protected>
   );

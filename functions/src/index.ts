@@ -9,7 +9,7 @@ import { defineSecret } from "firebase-functions/params";
 admin.initializeApp();
 const db = admin.firestore();
 
-type Sport = "NBA";
+type Sport = "NBA" | "MLB";
 type Market = "moneyline" | "spread" | "total" | "ou";
 type PickResult = "pending" | "win" | "loss" | "push";
 type PickSelection = "home" | "away" | "over" | "under";
@@ -20,8 +20,10 @@ export const placePick = onCall({ cors: true }, async (req) => {
   const sportRaw = String(
     req.data?.sport ?? req.data?.league ?? "NBA",
   ).toUpperCase();
-  if (sportRaw !== "NBA")
+  if (sportRaw !== "NBA" && sportRaw !== "MLB") {
     throw new HttpsError("invalid-argument", "Unsupported sport.");
+  }
+  const sport = sportRaw as Sport;
 
   const weekId = String(req.data?.weekId ?? "").trim();
   if (!weekId) throw new HttpsError("invalid-argument", "weekId is required.");
@@ -86,7 +88,7 @@ export const placePick = onCall({ cors: true }, async (req) => {
   if (!gameSnap && gameIdIn) {
     const q = await db
       .collection("games")
-      .where("sport", "==", "NBA")
+      .where("sport", "==", sport)
       .where("weekId", "==", weekId)
       .where("gameId", "==", gameIdIn)
       .limit(1)
@@ -99,7 +101,7 @@ export const placePick = onCall({ cors: true }, async (req) => {
   if (!gameSnap && externalGameId) {
     let q = await db
       .collection("games")
-      .where("sport", "==", "NBA")
+      .where("sport", "==", sport)
       .where("weekId", "==", weekId)
       .where("matchKey", "==", externalGameId)
       .limit(1)
@@ -110,7 +112,7 @@ export const placePick = onCall({ cors: true }, async (req) => {
     if (!gameSnap) {
       q = await db
         .collection("games")
-        .where("sport", "==", "NBA")
+        .where("sport", "==", sport)
         .where("weekId", "==", weekId)
         .where("oddsEventId", "==", externalGameId)
         .limit(1)
@@ -183,7 +185,7 @@ export const placePick = onCall({ cors: true }, async (req) => {
       "Game is missing gameId field.",
     );
 
-  const pickId = `${uid}_${weekId}_NBA_${gameIdField}_${market}`;
+  const pickId = `${uid}_${weekId}_${sport}_${gameIdField}_${market}`;
   const pickRef = db.collection("picks").doc(pickId);
 
   if (clear) {
@@ -194,8 +196,8 @@ export const placePick = onCall({ cors: true }, async (req) => {
   await pickRef.set(
     {
       uid,
-      sport: "NBA",
-      league: "NBA",
+      sport,
+      league: sport,
       weekId,
 
       // esto es lo que usa tu UI (pickMap) y tu resolver
@@ -300,136 +302,834 @@ function leaderboardEntryDocId(weekId: string, sport: string, uid: string) {
 }
 
 /** ===== Date + parsing helpers ===== */
-function ymd(date: Date) {
-  const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(date.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+// =============================
+// ODDS API (NBA) - Scheduled Jobs (v2)
+// =============================
+const ODDS_API_KEY = defineSecret("ODDS_API_KEY");
+
+const NBA_TEAM_MAP: Record<string, string> = {
+  "Atlanta Hawks": "ATL",
+  "Boston Celtics": "BOS",
+  "Brooklyn Nets": "BKN",
+  "Charlotte Hornets": "CHA",
+  "Chicago Bulls": "CHI",
+  "Cleveland Cavaliers": "CLE",
+  "Dallas Mavericks": "DAL",
+  "Denver Nuggets": "DEN",
+  "Detroit Pistons": "DET",
+  "Golden State Warriors": "GSW",
+  "Houston Rockets": "HOU",
+  "Indiana Pacers": "IND",
+  "Los Angeles Clippers": "LAC",
+  "LA Clippers": "LAC",
+  "Los Angeles Lakers": "LAL",
+  "Memphis Grizzlies": "MEM",
+  "Miami Heat": "MIA",
+  "Milwaukee Bucks": "MIL",
+  "Minnesota Timberwolves": "MIN",
+  "New Orleans Pelicans": "NOP",
+  "New York Knicks": "NYK",
+  "Oklahoma City Thunder": "OKC",
+  "Orlando Magic": "ORL",
+  "Philadelphia 76ers": "PHI",
+  "Phoenix Suns": "PHX",
+  "Portland Trail Blazers": "POR",
+  "Sacramento Kings": "SAC",
+  "San Antonio Spurs": "SAS",
+  "Toronto Raptors": "TOR",
+  "Utah Jazz": "UTA",
+  "Washington Wizards": "WAS",
+};
+
+function yyyymmddFromIso(iso: string) {
+  return String(iso).slice(0, 10).split("-").join("");
 }
 
-async function syncNBAGamesForDates(args: { dates: Date[] }) {
-  const sport: Sport = "NBA";
-  const apiKey = process.env.ODDS_API_KEY;
+function nbaAbbr(name: string) {
+  return NBA_TEAM_MAP[name] ?? null;
+}
 
-  if (!apiKey) throw new Error("Missing ODDS_API_KEY.");
+function prNow() {
+  return new Date(
+    new Date().toLocaleString("en-US", {
+      timeZone: "America/Puerto_Rico",
+    }),
+  );
+}
 
-  // OddsAPI scores endpoint (trae status + scores)
-  // daysFrom: cuantos días hacia atrás incluir
-  // Nota: pedimos varios días para cubrir juegos que terminaron ayer/antier
-  const maxBackDays = 3;
+function inNbaOddsWindow() {
+  const now = prNow();
+  const hour = now.getHours();
+  return hour >= 11 && hour <= 23;
+}
 
-  const url = `https://api.the-odds-api.com/v4/sports/basketball_nba/scores/?daysFrom=${maxBackDays}&apiKey=${apiKey}`;
-  const events = await axios.get(url).then((r) => r.data);
+function nbaNeutralMatchKeyFromOddsEventId(oddsEventId: string) {
+  return `NBA_${String(oddsEventId).trim()}`;
+}
 
-  for (const ev of events) {
-    // OddsAPI fields típicos:
-    // ev.id, ev.commence_time, ev.completed, ev.home_team, ev.away_team, ev.scores
+function nbaLegacyMatchKeyFromEvent(ev: any, home: string, away: string) {
+  const dateKey = yyyymmddFromIso(String(ev?.commence_time ?? ""));
+  return dateKey ? `NBA_${dateKey}_${home}_${away}` : "";
+}
+
+async function findExistingNbaGameDoc(args: {
+  oddsEventId?: string;
+  matchKey?: string;
+  legacyMatchKey?: string;
+}) {
+  const oddsEventId = String(args.oddsEventId ?? "").trim();
+  const matchKey = String(args.matchKey ?? "").trim();
+  const legacyMatchKey = String(args.legacyMatchKey ?? "").trim();
+
+  if (oddsEventId) {
+    let q = await db
+      .collection("games")
+      .where("sport", "==", "NBA")
+      .where("oddsEventId", "==", oddsEventId)
+      .limit(1)
+      .get();
+    if (!q.empty) return q.docs[0];
+
+    q = await db
+      .collection("games")
+      .where("sport", "==", "NBA")
+      .where("gameId", "==", oddsEventId)
+      .limit(1)
+      .get();
+    if (!q.empty) return q.docs[0];
+  }
+
+  if (matchKey) {
+    const q = await db
+      .collection("games")
+      .where("sport", "==", "NBA")
+      .where("matchKey", "==", matchKey)
+      .limit(1)
+      .get();
+    if (!q.empty) return q.docs[0];
+  }
+
+  if (legacyMatchKey) {
+    const q = await db
+      .collection("games")
+      .where("sport", "==", "NBA")
+      .where("matchKey", "==", legacyMatchKey)
+      .limit(1)
+      .get();
+    if (!q.empty) return q.docs[0];
+  }
+
+  return null;
+}
+
+async function runNbaEventsSync() {
+  const apiKey = ODDS_API_KEY.value();
+  const url = "https://api.the-odds-api.com/v4/sports/basketball_nba/events";
+
+  const { data } = await axios.get(url, {
+    params: { apiKey, dateFormat: "iso" },
+    timeout: 20000,
+  });
+
+  let upserted = 0;
+  let skipped = 0;
+  let migrated = 0;
+
+  for (const ev of data as Array<any>) {
+    const home = nbaAbbr(ev.home_team);
+    const away = nbaAbbr(ev.away_team);
+    if (!home || !away) {
+      skipped++;
+      continue;
+    }
+
     const commence = new Date(ev.commence_time);
-    if (Number.isNaN(commence.getTime())) continue;
+    if (Number.isNaN(commence.getTime())) {
+      skipped++;
+      continue;
+    }
 
-    // ✅ gameId compatible con tu esquema actual:
-    // "YYYYMMDD_<oddsEventId>"
-    const ymdUtc = ymd(
-      new Date(
-        Date.UTC(
-          commence.getUTCFullYear(),
-          commence.getUTCMonth(),
-          commence.getUTCDate(),
-        ),
-      ),
-    );
-    const gameId = `${ymdUtc}_${String(ev.id)}`;
+    const oddsEventId = String(ev.id ?? "").trim();
+    if (!oddsEventId) {
+      skipped++;
+      continue;
+    }
+
+    const legacyDateKey = yyyymmddFromIso(ev.commence_time);
+    const legacyMatchKey = nbaLegacyMatchKeyFromEvent(ev, home, away);
+    const matchKey = nbaNeutralMatchKeyFromOddsEventId(oddsEventId);
 
     const weekId = getWeekId(commence);
-    const docId = gameDocId(sport, weekId, gameId);
-    const ref = db.collection("games").doc(docId);
+    const gameId = oddsEventId;
+    const docId = gameDocId("NBA", weekId, gameId);
 
-    // Scores: ev.scores suele ser array [{name, score}]
-    let scoreHome: number | null = null;
-    let scoreAway: number | null = null;
+    const existing =
+      (await findExistingNbaGameDoc({
+        oddsEventId,
+        matchKey,
+        legacyMatchKey,
+      })) ?? null;
 
-    if (Array.isArray(ev.scores)) {
-      const homeRow = ev.scores.find((x: any) => x?.name === ev.home_team);
-      const awayRow = ev.scores.find((x: any) => x?.name === ev.away_team);
+    const targetRef = existing?.ref ?? db.collection("games").doc(docId);
+    if (existing && existing.id !== docId) {
+      migrated++;
+    }
 
-      const hs = homeRow?.score;
-      const as = awayRow?.score;
+    const existingData = existing?.exists ? (existing.data() as any) : null;
 
-      if (hs != null && as != null) {
-        const hsNum = Number(hs);
-        const asNum = Number(as);
-        if (!Number.isNaN(hsNum) && !Number.isNaN(asNum)) {
-          scoreHome = hsNum;
-          scoreAway = asNum;
+    await targetRef.set(
+      {
+        league: "NBA",
+        sport: "NBA",
+        weekId,
+        gameId,
+        matchKey,
+        legacyMatchKey: legacyMatchKey || null,
+        legacyDateKey: legacyDateKey || null,
+        oddsEventId,
+        homeTeam: home,
+        awayTeam: away,
+        startTime: admin.firestore.Timestamp.fromDate(commence),
+
+        // 👇 preservar si ya existía
+        status: existingData?.status ?? "scheduled",
+        scoreHome:
+          typeof existingData?.scoreHome === "number"
+            ? existingData.scoreHome
+            : null,
+        scoreAway:
+          typeof existingData?.scoreAway === "number"
+            ? existingData.scoreAway
+            : null,
+
+        source: "oddsapi",
+        createdAt: existingData?.createdAt ?? nowTs(),
+        updatedAt: nowTs(),
+      },
+      { merge: true },
+    );
+
+    upserted++;
+  }
+
+  console.log("[runNbaEventsSync] done", { upserted, skipped, migrated });
+  return { upserted, skipped, migrated };
+}
+
+async function runNbaOddsSync(opts?: { force?: boolean }) {
+  const force = opts?.force === true;
+
+  if (!force && !inNbaOddsWindow()) {
+    console.log("[runNbaOddsSync] skipped: outside PR odds window");
+    return { updated: 0, skipped: 0, reason: "outside-window" };
+  }
+
+  const apiKey = ODDS_API_KEY.value();
+  const url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds";
+
+  const { data } = await axios.get(url, {
+    params: {
+      apiKey,
+      regions: "us",
+      markets: "h2h,spreads,totals",
+      bookmakers: "draftkings",
+      oddsFormat: "american",
+      dateFormat: "iso",
+    },
+    timeout: 20000,
+  });
+
+  let updated = 0;
+  let skipped = 0;
+
+  const findOutcome = (m: any, name: string) =>
+    (m?.outcomes ?? []).find((o: any) => o?.name === name);
+
+  for (const ev of data as Array<any>) {
+    const home = nbaAbbr(ev.home_team);
+    const away = nbaAbbr(ev.away_team);
+    if (!home || !away) {
+      skipped++;
+      continue;
+    }
+
+    const commence = new Date(ev.commence_time);
+    if (Number.isNaN(commence.getTime())) {
+      skipped++;
+      continue;
+    }
+
+    const oddsEventId = String(ev.id ?? "").trim();
+    if (!oddsEventId) {
+      skipped++;
+      continue;
+    }
+
+    const legacyMatchKey = nbaLegacyMatchKeyFromEvent(ev, home, away);
+    const matchKey = nbaNeutralMatchKeyFromOddsEventId(oddsEventId);
+
+    const book = (ev.bookmakers ?? [])[0];
+    if (!book) {
+      skipped++;
+      continue;
+    }
+
+    const markets = book.markets ?? [];
+    const mH2H = markets.find((m: any) => m.key === "h2h");
+    const mSP = markets.find((m: any) => m.key === "spreads");
+    const mTOT = markets.find((m: any) => m.key === "totals");
+
+    const homeML = findOutcome(mH2H, ev.home_team)?.price ?? null;
+    const awayML = findOutcome(mH2H, ev.away_team)?.price ?? null;
+
+    const homeSP = findOutcome(mSP, ev.home_team);
+    const awaySP = findOutcome(mSP, ev.away_team);
+
+    const overTOT = findOutcome(mTOT, "Over");
+    const underTOT = findOutcome(mTOT, "Under");
+
+    const payload: any = {
+      oddsEventId,
+      matchKey,
+      legacyMatchKey: legacyMatchKey || null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      markets: {
+        moneyline:
+          homeML != null && awayML != null
+            ? { home: homeML, away: awayML }
+            : null,
+        spread:
+          homeSP?.point != null && awaySP?.point != null
+            ? {
+                homeLine: Number(homeSP.point),
+                awayLine: Number(awaySP.point),
+                homeOdds: homeSP.price ?? null,
+                awayOdds: awaySP.price ?? null,
+              }
+            : null,
+        total:
+          overTOT?.point != null && underTOT?.point != null
+            ? {
+                line: Number(overTOT.point),
+                overOdds: overTOT.price ?? null,
+                underOdds: underTOT.price ?? null,
+              }
+            : null,
+      },
+    };
+
+    const snap = await findExistingNbaGameDoc({
+      oddsEventId,
+      matchKey,
+      legacyMatchKey,
+    });
+
+    if (!snap) {
+      skipped++;
+      continue;
+    }
+
+    const game = snap.data() as any;
+    const status = String(game?.status ?? "").toLowerCase();
+
+    if (status === "final") {
+      skipped++;
+      continue;
+    }
+
+    await snap.ref.set(payload, { merge: true });
+    updated++;
+  }
+
+  console.log("[runNbaOddsSync] done", { updated, skipped, force });
+  return { updated, skipped };
+}
+
+async function runNbaScoresSync() {
+  const url =
+    "https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json";
+
+  const { data } = await axios.get(url, {
+    timeout: 20000,
+    headers: {
+      "User-Agent": "Stat2Win/1.0",
+      Accept: "application/json",
+    },
+  });
+
+  const games = data?.scoreboard?.games ?? [];
+  let updated = 0;
+  let matched = 0;
+
+  for (const g of games) {
+    const home = String(g?.homeTeam?.teamTricode ?? "").toUpperCase();
+    const away = String(g?.awayTeam?.teamTricode ?? "").toUpperCase();
+    if (!home || !away) continue;
+
+    const hs = Number(g?.homeTeam?.score ?? NaN);
+    const as = Number(g?.awayTeam?.score ?? NaN);
+
+    const gameStatus = String(g?.gameStatus ?? "");
+    const status =
+      gameStatus === "3"
+        ? "final"
+        : gameStatus === "2"
+          ? "inprogress"
+          : "scheduled";
+
+    const oddsEventId = String(g?.gameEt ?? g?.gameCode ?? "").trim();
+    const iso = String(g?.gameTimeUTC ?? "");
+    const startAt = iso ? new Date(iso) : null;
+    if (!startAt || Number.isNaN(startAt.getTime())) continue;
+
+    let snap =
+      (oddsEventId
+        ? await findExistingNbaGameDoc({
+            oddsEventId,
+            matchKey: nbaNeutralMatchKeyFromOddsEventId(oddsEventId),
+          })
+        : null) ?? null;
+
+    if (!snap) {
+      const q = await db
+        .collection("games")
+        .where("sport", "==", "NBA")
+        .where("homeTeam", "==", home)
+        .where("awayTeam", "==", away)
+        .limit(5)
+        .get();
+
+      if (!q.empty) {
+        const candidates = q.docs.filter((doc) => {
+          const game = doc.data() as any;
+          const gameStart = game?.startTime?.toDate?.() ?? null;
+          if (
+            !(gameStart instanceof Date) ||
+            Number.isNaN(gameStart.getTime())
+          ) {
+            return false;
+          }
+          const diffMs = Math.abs(gameStart.getTime() - startAt.getTime());
+          return diffMs <= 36 * 60 * 60 * 1000;
+        });
+
+        if (candidates.length) {
+          candidates.sort((a, b) => {
+            const aStart =
+              (a.data() as any)?.startTime?.toDate?.()?.getTime?.() ?? 0;
+            const bStart =
+              (b.data() as any)?.startTime?.toDate?.()?.getTime?.() ?? 0;
+            return (
+              Math.abs(aStart - startAt.getTime()) -
+              Math.abs(bStart - startAt.getTime())
+            );
+          });
+          snap = candidates[0];
         }
       }
     }
 
-    const status: any =
-      ev.completed === true
-        ? "final"
-        : scoreHome != null || scoreAway != null
-          ? "inprogress"
-          : "scheduled";
+    if (!snap) continue;
 
-    // ✅ OJO: NO te cambio homeTeam/awayTeam para no romper UI (tú ya los guardas abreviados)
-    // Solo seteo scores/status y odds ids.
-    const payload: any = {
-      sport,
-      weekId,
-      gameId,
-      oddsEventId: String(ev.id), // ✅ limpio
-      status,
-      startTime: admin.firestore.Timestamp.fromDate(commence),
+    matched++;
 
-      // ✅ tus campos correctos:
-      scoreHome,
-      scoreAway,
+    await snap.ref.set(
+      {
+        status,
+        scoreHome: Number.isNaN(hs) ? null : hs,
+        scoreAway: Number.isNaN(as) ? null : as,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
 
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    };
-
-    await ref.set(payload, { merge: true });
+    updated++;
   }
+
+  console.log("[runNbaScoresSync] done", {
+    total: games.length,
+    matched,
+    updated,
+  });
+
+  return { total: games.length, matched, updated };
 }
 
 export const syncNBAGamesNow = onCall(
-  { cors: true, secrets: ["ODDS_API_KEY"] },
+  { cors: true, secrets: [ODDS_API_KEY] },
   async (req) => {
-    await requireAdmin(req);
+    try {
+      await requireAdmin(req);
 
-    // no dependemos de weekId aquí; lo calcula por cada game según commence_time
-    const today = new Date();
-    const utcToday = new Date(
-      Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
-    );
+      const eventsRes = await runNbaEventsSync();
+      const oddsRes = await runNbaOddsSync({ force: true });
+      const scoresRes = await runNbaScoresSync();
 
-    await syncNBAGamesForDates({ dates: [utcToday] });
+      return {
+        ok: true,
+        mode: "manual-nba-full-sync",
+        events: eventsRes ?? null,
+        odds: oddsRes ?? null,
+        scores: scoresRes ?? null,
+      };
+    } catch (error: any) {
+      console.error("[syncNBAGamesNow] FAILED", {
+        message: error?.message ?? null,
+        code: error?.code ?? null,
+        details: error?.details ?? null,
+        stack: error?.stack ?? null,
+        axiosStatus: error?.response?.status ?? null,
+        axiosData: error?.response?.data ?? null,
+      });
 
-    return { ok: true };
+      const msg =
+        error?.message ||
+        error?.response?.data?.message ||
+        error?.response?.statusText ||
+        "syncNBAGamesNow failed";
+
+      throw new HttpsError("internal", msg);
+    }
   },
 );
+
 export const importNBAGamesDaily = onSchedule(
-  { schedule: "every day 05:00", secrets: ["ODDS_API_KEY"] },
+  { schedule: "0 5 * * *", timeZone: "America/Puerto_Rico" },
   async () => {
-    const today = new Date();
-    const utcToday = new Date(
-      Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
-    );
-    await syncNBAGamesForDates({ dates: [utcToday] });
+    console.log("[importNBAGamesDaily] legacy disabled");
   },
 );
 
 export const refreshNBAGamesEvery30Min = onSchedule(
-  { schedule: "every 30 minutes", secrets: ["ODDS_API_KEY"] },
+  { schedule: "every 30 minutes", timeZone: "America/Puerto_Rico" },
   async () => {
-    const today = new Date();
-    const utcToday = new Date(
-      Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
-    );
-    await syncNBAGamesForDates({ dates: [utcToday] });
+    console.log("[refreshNBAGamesEvery30Min] legacy disabled");
   },
 );
+
+/**
+ * 1) EVENTS: crea/actualiza juegos futuros (schedule)
+ *    - Corre 1 vez al día
+ */
+export const syncNbaEvents = onSchedule(
+  {
+    schedule: "0 8 * * *",
+    timeZone: "America/Puerto_Rico",
+    secrets: [ODDS_API_KEY],
+  },
+  async () => {
+    await runNbaEventsSync();
+  },
+);
+
+/**
+ * 2) ODDS: actualiza moneyline + spreads + totals desde DraftKings
+ *    - Corre cada 4 horas para ahorrar créditos
+ */
+export const syncNbaOdds = onSchedule(
+  {
+    schedule: "every 4 hours",
+    timeZone: "America/Puerto_Rico",
+    secrets: [ODDS_API_KEY],
+  },
+  async () => {
+    await runNbaOddsSync();
+  },
+);
+
+/**
+ * 3) SCORES: GRATIS (NBA official) - marca status + scores (final/live/scheduled)
+ *    - Corre cada 10 minutos
+ */
+export const syncNbaScores = onSchedule(
+  {
+    schedule: "*/10 * * * *",
+    timeZone: "America/Puerto_Rico",
+  },
+  async () => {
+    await runNbaScoresSync();
+  },
+);
+
+// =============================
+// ODDS API (MLB) - Scheduled Jobs (v2)
+// =============================
+const MLB_TEAM_MAP: Record<string, string> = {
+  "Arizona Diamondbacks": "ARI",
+  "Atlanta Braves": "ATL",
+  "Baltimore Orioles": "BAL",
+  "Boston Red Sox": "BOS",
+  "Chicago Cubs": "CHC",
+  "Chicago White Sox": "CWS",
+  "Cincinnati Reds": "CIN",
+  "Cleveland Guardians": "CLE",
+  "Colorado Rockies": "COL",
+  "Detroit Tigers": "DET",
+  "Houston Astros": "HOU",
+  "Kansas City Royals": "KC",
+  "Los Angeles Angels": "LAA",
+  "LA Angels": "LAA",
+  "Los Angeles Dodgers": "LAD",
+  "Miami Marlins": "MIA",
+  "Milwaukee Brewers": "MIL",
+  "Minnesota Twins": "MIN",
+  "New York Mets": "NYM",
+  "New York Yankees": "NYY",
+  Athletics: "OAK",
+  "Oakland Athletics": "OAK",
+  "Philadelphia Phillies": "PHI",
+  "Pittsburgh Pirates": "PIT",
+  "San Diego Padres": "SD",
+  "Seattle Mariners": "SEA",
+  "San Francisco Giants": "SF",
+  "St. Louis Cardinals": "STL",
+  "Tampa Bay Rays": "TB",
+  "Texas Rangers": "TEX",
+  "Toronto Blue Jays": "TOR",
+  "Washington Nationals": "WSH",
+};
+
+function mlbAbbr(name: string) {
+  return MLB_TEAM_MAP[name] ?? null;
+}
+
+function inMlbOddsWindow() {
+  const now = prNow();
+  const hour = now.getHours();
+  return hour >= 11 && hour <= 23;
+}
+
+async function runMlbEventsSync() {
+  const apiKey = ODDS_API_KEY.value();
+  const url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/events";
+
+  const { data } = await axios.get(url, {
+    params: { apiKey, dateFormat: "iso" },
+    timeout: 20000,
+  });
+
+  let upserted = 0;
+  let skipped = 0;
+
+  for (const ev of data as Array<any>) {
+    const home = mlbAbbr(ev.home_team);
+    const away = mlbAbbr(ev.away_team);
+    if (!home || !away) {
+      skipped++;
+      continue;
+    }
+
+    const commence = new Date(ev.commence_time);
+    if (Number.isNaN(commence.getTime())) {
+      skipped++;
+      continue;
+    }
+
+    const dateKey = yyyymmddFromIso(ev.commence_time);
+    const matchKey = `MLB_${dateKey}_${home}_${away}`;
+
+    const weekId = getWeekId(commence);
+    const gameId = `${dateKey}_${String(ev.id).slice(0, 20)}`;
+    const docId = gameDocId("MLB", weekId, gameId);
+
+    await db
+      .collection("games")
+      .doc(docId)
+      .set(
+        {
+          league: "MLB",
+          sport: "MLB",
+          weekId,
+          gameId,
+          matchKey,
+          oddsEventId: String(ev.id),
+          homeTeam: home,
+          awayTeam: away,
+          startTime: admin.firestore.Timestamp.fromDate(commence),
+          status: "scheduled",
+          scoreHome: null,
+          scoreAway: null,
+          source: "oddsapi",
+          createdAt: nowTs(),
+          updatedAt: nowTs(),
+        },
+        { merge: true },
+      );
+
+    upserted++;
+  }
+
+  console.log("[runMlbEventsSync] done", { upserted, skipped });
+  return { upserted, skipped };
+}
+
+async function runMlbOddsSync(opts?: { force?: boolean }) {
+  const force = opts?.force === true;
+
+  if (!force && !inMlbOddsWindow()) {
+    console.log("[runMlbOddsSync] skipped: outside PR odds window");
+    return { updated: 0, skipped: 0, reason: "outside-window" };
+  }
+
+  const apiKey = ODDS_API_KEY.value();
+  const url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds";
+
+  const { data } = await axios.get(url, {
+    params: {
+      apiKey,
+      regions: "us",
+      markets: "h2h,spreads,totals",
+      bookmakers: "draftkings",
+      oddsFormat: "american",
+      dateFormat: "iso",
+    },
+    timeout: 20000,
+  });
+
+  let updated = 0;
+  let skipped = 0;
+
+  const findOutcome = (m: any, name: string) =>
+    (m?.outcomes ?? []).find((o: any) => o?.name === name);
+
+  for (const ev of data as Array<any>) {
+    const home = mlbAbbr(ev.home_team);
+    const away = mlbAbbr(ev.away_team);
+    if (!home || !away) {
+      skipped++;
+      continue;
+    }
+
+    const commence = new Date(ev.commence_time);
+    if (Number.isNaN(commence.getTime())) {
+      skipped++;
+      continue;
+    }
+
+    const dateKey = yyyymmddFromIso(ev.commence_time);
+    if (!dateKey) {
+      skipped++;
+      continue;
+    }
+
+    const matchKey = `MLB_${dateKey}_${home}_${away}`;
+
+    const book = (ev.bookmakers ?? [])[0];
+    if (!book) {
+      skipped++;
+      continue;
+    }
+
+    const markets = book.markets ?? [];
+    const mH2H = markets.find((m: any) => m.key === "h2h");
+    const mSP = markets.find((m: any) => m.key === "spreads");
+    const mTOT = markets.find((m: any) => m.key === "totals");
+
+    const homeML = findOutcome(mH2H, ev.home_team)?.price ?? null;
+    const awayML = findOutcome(mH2H, ev.away_team)?.price ?? null;
+
+    const homeSP = findOutcome(mSP, ev.home_team);
+    const awaySP = findOutcome(mSP, ev.away_team);
+
+    const overTOT = findOutcome(mTOT, "Over");
+    const underTOT = findOutcome(mTOT, "Under");
+
+    const payload: any = {
+      oddsEventId: String(ev.id ?? ""),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      markets: {
+        moneyline:
+          homeML != null && awayML != null
+            ? { home: homeML, away: awayML }
+            : null,
+        spread:
+          homeSP?.point != null && awaySP?.point != null
+            ? {
+                homeLine: Number(homeSP.point),
+                awayLine: Number(awaySP.point),
+                homeOdds: homeSP.price ?? null,
+                awayOdds: awaySP.price ?? null,
+              }
+            : null,
+        total:
+          overTOT?.point != null && underTOT?.point != null
+            ? {
+                line: Number(overTOT.point),
+                overOdds: overTOT.price ?? null,
+                underOdds: underTOT.price ?? null,
+              }
+            : null,
+      },
+    };
+
+    const snap = await db
+      .collection("games")
+      .where("matchKey", "==", matchKey)
+      .limit(1)
+      .get();
+
+    if (snap.empty) {
+      skipped++;
+      continue;
+    }
+
+    const game = snap.docs[0].data() as any;
+    const status = String(game?.status ?? "").toLowerCase();
+
+    if (status === "final" || status === "inprogress") {
+      skipped++;
+      continue;
+    }
+
+    await snap.docs[0].ref.set(payload, { merge: true });
+    updated++;
+  }
+
+  console.log("[runMlbOddsSync] done", { updated, skipped, force });
+  return { updated, skipped };
+}
+export const syncMLBGamesNow = onCall(
+  { cors: true, secrets: [ODDS_API_KEY] },
+  async (req) => {
+    await requireAdmin(req);
+
+    await runMlbEventsSync();
+    await runMlbOddsSync({ force: true });
+
+    return { ok: true, mode: "manual-mlb-sync" };
+  },
+);
+
+/**
+ * MLB EVENTS: crea/actualiza juegos futuros
+ * - Corre 1 vez al día
+ */
+export const syncMlbEvents = onSchedule(
+  {
+    schedule: "30 8 * * *",
+    timeZone: "America/Puerto_Rico",
+    secrets: [ODDS_API_KEY],
+  },
+  async () => {
+    await runMlbEventsSync();
+  },
+);
+
+/**
+ * MLB ODDS: solo moneyline por ahora
+ * - Corre cada 6 horas para ahorrar créditos
+ */
+export const syncMlbOdds = onSchedule(
+  {
+    schedule: "every 6 hours",
+    timeZone: "America/Puerto_Rico",
+    secrets: [ODDS_API_KEY],
+  },
+  async () => {
+    await runMlbOddsSync();
+  },
+);
+
 /** ===== (3) Ensure leaderboard docs exist when a pick exists ===== */
 export const onPickWriteEnsureLeaderboard = onDocumentWritten(
   "picks/{pickId}",
@@ -443,7 +1143,7 @@ export const onPickWriteEnsureLeaderboard = onDocumentWritten(
 
     const rawSport = pick.sport ?? pick.league ?? pick.tournamentSport ?? "";
     const sportStr = String(rawSport).toUpperCase();
-    if (sportStr !== "NBA") return;
+    if (sportStr !== "NBA" && sportStr !== "MLB") return;
 
     let weekId = String(pick.weekId ?? pick.week ?? "");
     if (!weekId) {
@@ -461,7 +1161,7 @@ export const onPickWriteEnsureLeaderboard = onDocumentWritten(
       );
     }
 
-    const sport: Sport = "NBA";
+    const sport = sportStr as Sport;
 
     const lbId = leaderboardDocId(weekId, sport);
     const lbRef = db.collection("leaderboards").doc(lbId);
@@ -555,6 +1255,28 @@ export const onPickWriteEnsureLeaderboard = onDocumentWritten(
         );
       }
 
+      if (username) {
+        tx.set(
+          userRef,
+          {
+            username,
+            displayName: username,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+
+        tx.set(
+          entryRef,
+          {
+            username,
+            displayName: username,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      }
+
       tx.set(after.ref, { lbEnsured: true, lbId, entryId }, { merge: true });
     });
   },
@@ -568,134 +1290,58 @@ export const onPickWriteEnsureLeaderboard = onDocumentWritten(
  * 2) leaderboardsEntries/{weekId_sport_uid}
  */
 function applyLeaderboardForPickTx(
-  tx: admin.firestore.Transaction,
+  tx: FirebaseFirestore.Transaction,
   pick: any,
-  result: "win" | "loss" | "push",
+  result: Exclude<PickResult, "pending">,
   points: number,
 ) {
-  const uid = pick.uid;
-  if (!uid) return;
+  const uid = String(pick.uid ?? "").trim();
+  const weekId = String(pick.weekId ?? "").trim();
+  const sportStr = String(pick.sport ?? pick.league ?? "NBA").toUpperCase();
 
-  const weekId = String(pick.weekId ?? "");
-  const sport = String(pick.sport ?? "NBA").toUpperCase();
+  if (!uid || !weekId) return;
+  if (sportStr !== "NBA" && sportStr !== "MLB") return;
 
-  // ==============================
-  // ✅ UPDATE USER PROFILE (Dashboard)
-  // ==============================
-  const userRef = db.collection("users").doc(uid);
+  const sport = sportStr as Sport;
+
+  const lbId = leaderboardDocId(weekId, sport);
+  const entryId = leaderboardEntryDocId(weekId, sport, uid);
+
+  const lbRef = db.collection("leaderboards").doc(lbId);
+  const entryRef = db.collection("leaderboardsEntries").doc(entryId);
+
+  const winInc = result === "win" ? 1 : 0;
+  const lossInc = result === "loss" ? 1 : 0;
+  const pushInc = result === "push" ? 1 : 0;
 
   tx.set(
-    userRef,
+    lbRef,
     {
-      // tu frontend usa users.points
-      points: admin.firestore.FieldValue.increment(points),
-
-      // opcional (si algún día quieres separar)
-      totalPoints: admin.firestore.FieldValue.increment(points),
-
-      wins:
-        result === "win"
-          ? admin.firestore.FieldValue.increment(1)
-          : admin.firestore.FieldValue.increment(0),
-
-      losses:
-        result === "loss"
-          ? admin.firestore.FieldValue.increment(1)
-          : admin.firestore.FieldValue.increment(0),
-
-      pushes:
-        result === "push"
-          ? admin.firestore.FieldValue.increment(1)
-          : admin.firestore.FieldValue.increment(0),
-
+      weekId,
+      sport,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
     { merge: true },
   );
 
-  if (!weekId) return;
-
-  const leaderboardId = `${weekId}_${sport}`;
-
-  // ==============================
-  // ✅ WEEKLY leaderboard subcollection (leaderboards/{id}/users/{uid})
-  // ==============================
-  const lbUserRef = db
-    .collection("leaderboards")
-    .doc(leaderboardId)
-    .collection("users")
-    .doc(uid);
-
   tx.set(
-    lbUserRef,
+    entryRef,
     {
       uid,
       weekId,
       sport,
-
-      username: pick.username ?? null,
-      displayName: pick.displayName ?? pick.username ?? null,
-
       points: admin.firestore.FieldValue.increment(points),
-      picks: admin.firestore.FieldValue.increment(1),
-
-      wins:
-        result === "win"
-          ? admin.firestore.FieldValue.increment(1)
-          : admin.firestore.FieldValue.increment(0),
-      losses:
-        result === "loss"
-          ? admin.firestore.FieldValue.increment(1)
-          : admin.firestore.FieldValue.increment(0),
-      pushes:
-        result === "push"
-          ? admin.firestore.FieldValue.increment(1)
-          : admin.firestore.FieldValue.increment(0),
-
+      wins: admin.firestore.FieldValue.increment(winInc),
+      losses: admin.firestore.FieldValue.increment(lossInc),
+      pushes: admin.firestore.FieldValue.increment(pushInc),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
     { merge: true },
   );
 
-  // ==============================
-  // ✅ FLAT leaderboard entry (leaderboardsEntries/{week_sport_uid})
-  // (TU UI LA ESTÁ USANDO)
-  // ==============================
-  const entryId = `${leaderboardId}_${uid}`; // ej: 2026-W08_NBA_LzGf...
-  const lbEntryRef = db.collection("leaderboardsEntries").doc(entryId);
-
-  tx.set(
-    lbEntryRef,
-    {
-      uid,
-      weekId,
-      sport,
-      league: sport, // por si tu UI filtra por league
-
-      username: pick.username ?? null,
-      displayName: pick.displayName ?? pick.username ?? null,
-
-      points: admin.firestore.FieldValue.increment(points),
-      picks: admin.firestore.FieldValue.increment(1),
-
-      wins:
-        result === "win"
-          ? admin.firestore.FieldValue.increment(1)
-          : admin.firestore.FieldValue.increment(0),
-      losses:
-        result === "loss"
-          ? admin.firestore.FieldValue.increment(1)
-          : admin.firestore.FieldValue.increment(0),
-      pushes:
-        result === "push"
-          ? admin.firestore.FieldValue.increment(1)
-          : admin.firestore.FieldValue.increment(0),
-
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    },
-    { merge: true },
-  );
+  // 👇 IMPORTANTE:
+  // NO tocamos users.points aquí para evitar doble suma/inconsistencias
+  // entre resolución automática y recomputes manuales.
 }
 
 /** ===== Pick resolve helpers (real win/loss/push) ===== */
@@ -794,7 +1440,8 @@ export const onGameWriteResolvePicks = onDocumentWritten(
     const game = after.data() as any;
 
     const sportStr = String(game.sport ?? game.league ?? "NBA").toUpperCase();
-    if (sportStr !== "NBA") return;
+    if (sportStr !== "NBA" && sportStr !== "MLB") return;
+    const sport = sportStr as Sport;
 
     const status = String(game.status ?? "").toLowerCase();
     if (status !== "final") return;
@@ -805,10 +1452,10 @@ export const onGameWriteResolvePicks = onDocumentWritten(
 
     const picksSnap = await db
       .collection("picks")
-      .where("sport", "==", "NBA")
+      .where("sport", "==", sport)
       .where("weekId", "==", weekId)
       .where("gameId", "==", gameId)
-      .where("result", "==", "pending")
+
       .get();
 
     if (picksSnap.empty) return;
@@ -820,18 +1467,29 @@ export const onGameWriteResolvePicks = onDocumentWritten(
         const result = computePickResult(game, pick);
         const points = pointsForResult(result);
 
+        const alreadyCorrect =
+          pick.result === result && pick.pointsAwarded === points;
+
+        if (alreadyCorrect) continue;
+
+        const wasPending = String(pick.result ?? "pending") === "pending";
+
         tx.set(
           docSnap.ref,
           {
             result,
             pointsAwarded: points,
-            leaderboardApplied: true,
+            leaderboardApplied: wasPending
+              ? true
+              : (pick.leaderboardApplied ?? false),
             resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
           { merge: true },
         );
 
-        applyLeaderboardForPickTx(tx, pick, result as any, points);
+        if (wasPending) {
+          applyLeaderboardForPickTx(tx, pick, result as any, points);
+        }
       }
     });
   },
@@ -969,40 +1627,12 @@ function nowTs() {
   return admin.firestore.FieldValue.serverTimestamp();
 }
 
-function marketKey(m: string) {
-  const x = String(m ?? "").toLowerCase();
-  if (x === "moneyline") return "ML";
-  if (x === "spread") return "Spread";
-  return "OU"; // total / ou
-}
+async function recomputeWeekForSport(args: { weekId: string; sport: Sport }) {
+  const { weekId, sport } = args;
 
-export const adminRecomputeNBAWeek = onCall({ cors: true }, async (req) => {
-  // ✅ Admin only
-  await requireAdmin(req);
-
-  const weekId = String(req.data?.weekId ?? "").trim();
-  if (!weekId) {
-    throw new HttpsError(
-      "invalid-argument",
-      'weekId is required. Example: "2026-W08"',
-    );
-  }
-
-  const sport: Sport = "NBA";
   const lbId = leaderboardDocId(weekId, sport);
+  const lbRef = db.collection("leaderboards").doc(lbId);
 
-  // asegúrate que existe el leaderboard root doc
-  await db.collection("leaderboards").doc(lbId).set(
-    {
-      sport,
-      weekId,
-      updatedAt: nowTs(),
-      createdAt: nowTs(),
-    },
-    { merge: true },
-  );
-
-  // Traer picks resueltos de la semana NBA
   const picksSnap = await db
     .collection("picks")
     .where("sport", "==", sport)
@@ -1010,533 +1640,160 @@ export const adminRecomputeNBAWeek = onCall({ cors: true }, async (req) => {
     .where("result", "in", ["win", "loss", "push"])
     .get();
 
-  if (picksSnap.empty) {
-    return { ok: true, weekId, sport, message: "No resolved picks found." };
-  }
+  const userProfileCache = new Map<
+    string,
+    { username?: string; displayName?: string }
+  >();
 
-  type Totals = {
-    uid: string;
-    username?: string | null;
-    displayName?: string | null;
-    league?: string | null;
-    sport: Sport;
-    weekId: string;
-
-    points: number;
-    picks: number;
-    wins: number;
-    losses: number;
-    pushes: number;
-
-    pointsML: number;
-    pointsSpread: number;
-    pointsOU: number;
-    picksML: number;
-    picksSpread: number;
-    picksOU: number;
-    winsML: number;
-    winsSpread: number;
-    winsOU: number;
-    lossesML: number;
-    lossesSpread: number;
-    lossesOU: number;
-    pushesML: number;
-    pushesSpread: number;
-    pushesOU: number;
-  };
-
-  const byUid = new Map<string, Totals>();
-
-  function getOrInit(uid: string, base: any): Totals {
-    const existing = byUid.get(uid);
-    if (existing) return existing;
-
-    const t: Totals = {
-      uid,
-      username: base?.username ?? null,
-      displayName: base?.displayName ?? base?.username ?? null,
-      league: base?.league ?? "NBA",
-      sport,
-      weekId,
-
-      points: 0,
-      picks: 0,
-      wins: 0,
-      losses: 0,
-      pushes: 0,
-
-      pointsML: 0,
-      pointsSpread: 0,
-      pointsOU: 0,
-      picksML: 0,
-      picksSpread: 0,
-      picksOU: 0,
-      winsML: 0,
-      winsSpread: 0,
-      winsOU: 0,
-      lossesML: 0,
-      lossesSpread: 0,
-      lossesOU: 0,
-      pushesML: 0,
-      pushesSpread: 0,
-      pushesOU: 0,
-    };
-
-    byUid.set(uid, t);
-    return t;
-  }
+  const acc = new Map<
+    string,
+    {
+      uid: string;
+      weekId: string;
+      sport: Sport;
+      username?: string;
+      displayName?: string;
+      points: number;
+      wins: number;
+      losses: number;
+      pushes: number;
+    }
+  >();
 
   for (const doc of picksSnap.docs) {
     const p = doc.data() as any;
-    const uid = String(p.uid ?? p.userId ?? "");
+    const uid = String(p.uid ?? "").trim();
     if (!uid) continue;
 
-    const result = String(p.result ?? "loss") as PickResult;
-    const pointsAwarded = Number(p.pointsAwarded ?? 0) || 0;
+    const result = String(p.result ?? "pending") as PickResult;
+    if (result !== "win" && result !== "loss" && result !== "push") continue;
 
-    const t = getOrInit(uid, p);
+    if (!userProfileCache.has(uid)) {
+      const userSnap = await db.collection("users").doc(uid).get();
+      const userData = userSnap.exists ? (userSnap.data() as any) : {};
+      const username = String(
+        userData?.username ?? userData?.displayName ?? "",
+      ).trim();
 
-    t.picks += 1;
-    t.points += pointsAwarded;
-
-    if (result === "win") t.wins += 1;
-    else if (result === "loss") t.losses += 1;
-    else t.pushes += 1;
-
-    const mk = marketKey(p.market ?? "moneyline");
-
-    if (mk === "ML") {
-      t.picksML += 1;
-      t.pointsML += pointsAwarded;
-      if (result === "win") t.winsML += 1;
-      else if (result === "loss") t.lossesML += 1;
-      else t.pushesML += 1;
-    } else if (mk === "Spread") {
-      t.picksSpread += 1;
-      t.pointsSpread += pointsAwarded;
-      if (result === "win") t.winsSpread += 1;
-      else if (result === "loss") t.lossesSpread += 1;
-      else t.pushesSpread += 1;
-    } else {
-      t.picksOU += 1;
-      t.pointsOU += pointsAwarded;
-      if (result === "win") t.winsOU += 1;
-      else if (result === "loss") t.lossesOU += 1;
-      else t.pushesOU += 1;
+      userProfileCache.set(uid, {
+        username: username || undefined,
+        displayName: username || undefined,
+      });
     }
+
+    const profile = userProfileCache.get(uid) ?? {};
+
+    const row = acc.get(uid) ?? {
+      uid,
+      weekId,
+      sport,
+      username: profile.username,
+      displayName: profile.displayName,
+      points: 0,
+      wins: 0,
+      losses: 0,
+      pushes: 0,
+    };
+
+    const points =
+      typeof p.pointsAwarded === "number"
+        ? Number(p.pointsAwarded)
+        : pointsForResult(result);
+
+    row.points += points;
+    if (result === "win") row.wins += 1;
+    else if (result === "loss") row.losses += 1;
+    else if (result === "push") row.pushes += 1;
+
+    acc.set(uid, row);
   }
 
-  const updates: Array<{
-    uid: string;
-    appliedDiff: number;
-    newPoints: number;
-  }> = [];
+  const existingSnap = await db
+    .collection("leaderboardsEntries")
+    .where("sport", "==", sport)
+    .where("weekId", "==", weekId)
+    .get();
 
-  for (const totals of byUid.values()) {
-    const uid = totals.uid;
+  const batch = db.batch();
 
-    const entryId = leaderboardEntryDocId(weekId, sport, uid);
+  for (const doc of existingSnap.docs) {
+    batch.delete(doc.ref);
+  }
+
+  batch.set(
+    lbRef,
+    {
+      weekId,
+      sport,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  for (const row of acc.values()) {
+    const entryId = leaderboardEntryDocId(weekId, sport, row.uid);
     const entryRef = db.collection("leaderboardsEntries").doc(entryId);
 
-    const lbUserRef = db
-      .collection("leaderboards")
-      .doc(lbId)
-      .collection("users")
-      .doc(uid);
-
-    const userRef = db.collection("users").doc(uid);
-
-    // ✅ transaction-safe diff so you DON’T duplicate points
-    const diff = await db.runTransaction(async (tx) => {
-      const entrySnap = await tx.get(entryRef);
-      const prevPoints = entrySnap.exists
-        ? Number(entrySnap.data()?.points ?? 0) || 0
-        : 0;
-
-      const d = totals.points - prevPoints;
-
-      tx.set(
-        entryRef,
-        {
-          ...totals,
-          updatedAt: nowTs(),
-          createdAt: entrySnap.exists
-            ? (entrySnap.data()?.createdAt ?? nowTs())
-            : nowTs(),
-        },
-        { merge: true },
-      );
-
-      tx.set(
-        lbUserRef,
-        {
-          ...totals,
-          updatedAt: nowTs(),
-          createdAt: nowTs(),
-        },
-        { merge: true },
-      );
-
-      if (d !== 0) {
-        tx.set(
-          userRef,
-          {
-            points: admin.firestore.FieldValue.increment(d),
-            updatedAt: nowTs(),
-          },
-          { merge: true },
-        );
-      }
-
-      return d;
-    });
-
-    updates.push({ uid, appliedDiff: diff, newPoints: totals.points });
+    batch.set(
+      entryRef,
+      {
+        uid: row.uid,
+        weekId,
+        sport,
+        ...(row.username
+          ? {
+              username: row.username,
+              displayName: row.displayName ?? row.username,
+            }
+          : {}),
+        points: row.points,
+        wins: row.wins,
+        losses: row.losses,
+        pushes: row.pushes,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
   }
+
+  await batch.commit();
 
   return {
     ok: true,
-    weekId,
     sport,
-    leaderboardId: lbId,
-    usersUpdated: updates.length,
-    updates,
+    weekId,
+    resolvedPicks: picksSnap.size,
+    leaderboardsEntries: acc.size,
   };
+}
+
+export const adminRecomputeNBAWeek = onCall({ cors: true }, async (req) => {
+  await requireAdmin(req);
+
+  const weekId = String(req.data?.weekId ?? "").trim();
+  if (!/^\d{4}-W\d{2}$/.test(weekId)) {
+    throw new HttpsError(
+      "invalid-argument",
+      'WeekId inválido. Usa formato "2026-W12".',
+    );
+  }
+
+  return await recomputeWeekForSport({ weekId, sport: "NBA" });
 });
 
-// =============================
-// ODDS API (NBA) - Scheduled Jobs (v2)
-// =============================
-const ODDS_API_KEY = defineSecret("ODDS_API_KEY");
+export const adminRecomputeMLBWeek = onCall({ cors: true }, async (req) => {
+  await requireAdmin(req);
 
-const NBA_TEAM_MAP: Record<string, string> = {
-  "Atlanta Hawks": "ATL",
-  "Boston Celtics": "BOS",
-  "Brooklyn Nets": "BKN",
-  "Charlotte Hornets": "CHA",
-  "Chicago Bulls": "CHI",
-  "Cleveland Cavaliers": "CLE",
-  "Dallas Mavericks": "DAL",
-  "Denver Nuggets": "DEN",
-  "Detroit Pistons": "DET",
-  "Golden State Warriors": "GSW",
-  "Houston Rockets": "HOU",
-  "Indiana Pacers": "IND",
-  "Los Angeles Clippers": "LAC",
-  "LA Clippers": "LAC",
-  "Los Angeles Lakers": "LAL",
-  "Memphis Grizzlies": "MEM",
-  "Miami Heat": "MIA",
-  "Milwaukee Bucks": "MIL",
-  "Minnesota Timberwolves": "MIN",
-  "New Orleans Pelicans": "NOP",
-  "New York Knicks": "NYK",
-  "Oklahoma City Thunder": "OKC",
-  "Orlando Magic": "ORL",
-  "Philadelphia 76ers": "PHI",
-  "Phoenix Suns": "PHX",
-  "Portland Trail Blazers": "POR",
-  "Sacramento Kings": "SAC",
-  "San Antonio Spurs": "SAS",
-  "Toronto Raptors": "TOR",
-  "Utah Jazz": "UTA",
-  "Washington Wizards": "WAS",
-};
+  const weekId = String(req.data?.weekId ?? "").trim();
+  if (!/^\d{4}-W\d{2}$/.test(weekId)) {
+    throw new HttpsError(
+      "invalid-argument",
+      'WeekId inválido. Usa formato "2026-W12".',
+    );
+  }
 
-function yyyymmddFromIso(iso: string) {
-  // "2026-02-27T00:10:00Z" -> "20260227"
-  return String(iso).slice(0, 10).split("-").join("");
-}
-
-function nbaAbbr(name: string) {
-  return NBA_TEAM_MAP[name] ?? null;
-}
-
-/**
- * 1) EVENTS: crea/actualiza juegos futuros (schedule)
- *    - Corre 1 vez al día
- */
-export const syncNbaEvents = onSchedule(
-  {
-    schedule: "0 8 * * *", // 8:00 AM todos los días
-    timeZone: "America/Puerto_Rico",
-    secrets: [ODDS_API_KEY],
-  },
-  async () => {
-    const apiKey = ODDS_API_KEY.value();
-    const url = "https://api.the-odds-api.com/v4/sports/basketball_nba/events";
-
-    const { data } = await axios.get(url, {
-      params: { apiKey, dateFormat: "iso" },
-      timeout: 20000,
-    });
-
-    let upserted = 0;
-    let skipped = 0;
-
-    for (const ev of data as Array<any>) {
-      const home = nbaAbbr(ev.home_team);
-      const away = nbaAbbr(ev.away_team);
-      if (!home || !away) {
-        skipped++;
-        continue;
-      }
-
-      const commence = new Date(ev.commence_time);
-      const dateKey = yyyymmddFromIso(ev.commence_time);
-      const matchKey = `NBA_${dateKey}_${home}_${away}`;
-
-      // usa tu helper existente getWeekId()
-      const weekId = getWeekId(commence);
-
-      // gameId parecido a tus scripts: fecha + oddsEventId
-      const gameId = `${dateKey}_${String(ev.id).slice(0, 20)}`;
-      const docId = `NBA_${weekId}_${gameId}`;
-
-      await db
-        .collection("games")
-        .doc(docId)
-        .set(
-          {
-            league: "NBA",
-            sport: "NBA",
-            weekId,
-            gameId,
-            matchKey,
-            oddsEventId: ev.id,
-            homeTeam: home,
-            awayTeam: away,
-            startTime: admin.firestore.Timestamp.fromDate(commence),
-            status: "scheduled",
-            scoreHome: null,
-            scoreAway: null,
-            source: "oddsapi",
-            createdAt: nowTs(),
-            updatedAt: nowTs(),
-          },
-          { merge: true },
-        );
-
-      upserted++;
-    }
-
-    console.log(`[syncNbaEvents] upserted=${upserted} skipped=${skipped}`);
-  },
-);
-
-/**
- * 2) ODDS: actualiza moneyline + spreads + totals desde DraftKings
- * - Corre cada 2 horas (ahorra créditos)
- */
-export const syncNbaOdds = onSchedule(
-  {
-    schedule: "every 2 hours",
-    timeZone: "America/Puerto_Rico",
-    secrets: [ODDS_API_KEY],
-  },
-  async () => {
-    const apiKey = ODDS_API_KEY.value();
-    const url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds";
-
-    const { data } = await axios.get(url, {
-      params: {
-        apiKey,
-        regions: "us",
-        markets: "h2h,spreads,totals",
-        bookmakers: "draftkings",
-        oddsFormat: "american",
-        dateFormat: "iso",
-      },
-      timeout: 20000,
-    });
-
-    let updated = 0;
-    let skipped = 0;
-
-    const findOutcome = (m: any, name: string) =>
-      (m?.outcomes ?? []).find((o: any) => o?.name === name);
-
-    for (const ev of data as Array<any>) {
-      const home = nbaAbbr(ev.home_team);
-      const away = nbaAbbr(ev.away_team);
-      if (!home || !away) {
-        skipped++;
-        continue;
-      }
-
-      const dateKey = yyyymmddFromIso(ev.commence_time);
-      if (!dateKey) {
-        skipped++;
-        continue;
-      }
-
-      const matchKey = `NBA_${dateKey}_${home}_${away}`;
-
-      const book = (ev.bookmakers ?? [])[0];
-      if (!book) {
-        skipped++;
-        continue;
-      }
-
-      const markets = book.markets ?? [];
-      const mH2H = markets.find((m: any) => m.key === "h2h");
-      const mSP = markets.find((m: any) => m.key === "spreads");
-      const mTOT = markets.find((m: any) => m.key === "totals");
-
-      // moneyline
-      const homeML = findOutcome(mH2H, ev.home_team)?.price ?? null;
-      const awayML = findOutcome(mH2H, ev.away_team)?.price ?? null;
-
-      // spread
-      const homeSP = findOutcome(mSP, ev.home_team);
-      const awaySP = findOutcome(mSP, ev.away_team);
-
-      // totals
-      const overTOT = findOutcome(mTOT, "Over");
-      const underTOT = findOutcome(mTOT, "Under");
-
-      const payload: any = {
-        oddsEventId: String(ev.id ?? ""),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        markets: {
-          moneyline:
-            homeML != null && awayML != null
-              ? { home: homeML, away: awayML }
-              : null,
-          spread:
-            homeSP?.point != null && awaySP?.point != null
-              ? {
-                  homeLine: Number(homeSP.point),
-                  awayLine: Number(awaySP.point),
-                  homeOdds: homeSP.price ?? null,
-                  awayOdds: awaySP.price ?? null,
-                }
-              : null,
-          total:
-            overTOT?.point != null && underTOT?.point != null
-              ? {
-                  line: Number(overTOT.point),
-                  overOdds: overTOT.price ?? null,
-                  underOdds: underTOT.price ?? null,
-                }
-              : null,
-        },
-      };
-
-      const snap = await db
-        .collection("games")
-        .where("matchKey", "==", matchKey)
-        .limit(1)
-        .get();
-
-      if (snap.empty) {
-        skipped++;
-        continue;
-      }
-
-      await snap.docs[0].ref.set(payload, { merge: true });
-      updated++;
-    }
-
-    console.log("syncNbaOdds done", { updated, skipped });
-  },
-);
-
-/**
- * 3) SCORES: GRATIS (NBA official) - marca status + scores (final/live/scheduled)
- * - Corre cada 10 minutos
- */
-export const syncNbaScores = onSchedule(
-  {
-    schedule: "*/10 * * * *",
-    timeZone: "America/Puerto_Rico",
-  },
-  async () => {
-    const url =
-      "https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json";
-
-    const { data } = await axios.get(url, {
-      timeout: 20000,
-      headers: {
-        "User-Agent": "Stat2Win/1.0",
-        Accept: "application/json",
-      },
-    });
-
-    const games = data?.scoreboard?.games ?? [];
-    let updated = 0;
-    let matched = 0;
-
-    const dateKeyPR = (d: Date) => {
-      const parts = new Intl.DateTimeFormat("en-CA", {
-        timeZone: "America/Puerto_Rico",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).formatToParts(d);
-
-      const y = parts.find((p) => p.type === "year")?.value ?? "";
-      const m = parts.find((p) => p.type === "month")?.value ?? "";
-      const day = parts.find((p) => p.type === "day")?.value ?? "";
-      if (!y || !m || !day) return "";
-      return `${y}${m}${day}`;
-    };
-
-    for (const g of games) {
-      const home = String(g?.homeTeam?.teamTricode ?? "").toUpperCase();
-      const away = String(g?.awayTeam?.teamTricode ?? "").toUpperCase();
-      if (!home || !away) continue;
-
-      const hs = Number(g?.homeTeam?.score ?? NaN);
-      const as = Number(g?.awayTeam?.score ?? NaN);
-
-      const gameStatus = String(g?.gameStatus ?? "");
-      const status =
-        gameStatus === "3"
-          ? "final"
-          : gameStatus === "2"
-            ? "inprogress"
-            : "scheduled";
-
-      const iso = String(g?.gameTimeUTC ?? "");
-      const d = iso ? new Date(iso) : null;
-      if (!d || Number.isNaN(d.getTime())) continue;
-
-      const dateKey = dateKeyPR(d);
-      if (!dateKey) continue;
-
-      const matchKey = `NBA_${dateKey}_${home}_${away}`;
-
-      const snap = await db
-        .collection("games")
-        .where("matchKey", "==", matchKey)
-        .limit(1)
-        .get();
-
-      if (snap.empty) continue;
-
-      matched++;
-
-      await snap.docs[0].ref.set(
-        {
-          status,
-          scoreHome: Number.isNaN(hs) ? null : hs,
-          scoreAway: Number.isNaN(as) ? null : as,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
-
-      updated++;
-    }
-
-    console.log("syncNbaScores done", {
-      total: games.length,
-      matched,
-      updated,
-    });
-  },
-);
+  return await recomputeWeekForSport({ weekId, sport: "MLB" });
+});
 
 export const claimDailyLoginReward = onCall({ cors: true }, async (req) => {
   const uid = requireAuth(req);
@@ -1588,3 +1845,303 @@ export const claimDailyLoginReward = onCall({ cors: true }, async (req) => {
 
   return result;
 });
+
+export const getLeaderboardWeek = onCall({ cors: true }, async (req) => {
+  if (!req.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const weekId = String(req.data?.weekId ?? "").trim();
+  const sportRaw = String(req.data?.sport ?? "NBA")
+    .trim()
+    .toUpperCase();
+  const marketRaw = String(req.data?.market ?? "ALL")
+    .trim()
+    .toUpperCase();
+
+  if (!/^\d{4}-W\d{2}$/.test(weekId)) {
+    throw new HttpsError(
+      "invalid-argument",
+      'Invalid weekId. Use format "2026-W12".',
+    );
+  }
+
+  if (sportRaw !== "NBA" && sportRaw !== "MLB") {
+    throw new HttpsError("invalid-argument", "Unsupported sport.");
+  }
+
+  const sport = sportRaw as "NBA" | "MLB";
+  const market = marketRaw as "ALL" | "ML" | "SPREAD" | "OU";
+
+  const orderField =
+    market === "ML"
+      ? "pointsML"
+      : market === "SPREAD"
+        ? "pointsSpread"
+        : market === "OU"
+          ? "pointsOU"
+          : "points";
+
+  const snap = await db
+    .collection("leaderboardsEntries")
+    .where("weekId", "==", weekId)
+    .where("sport", "==", sport)
+    .orderBy(orderField, "desc")
+    .limit(200)
+    .get();
+
+  const rows = snap.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+
+  return { ok: true, rows };
+});
+
+export const getMyPicksWeek = onCall({ cors: true }, async (req) => {
+  const uid = requireAuth(req);
+
+  const weekId = String(req.data?.weekId ?? "").trim();
+  if (!/^\d{4}-W\d{2}$/.test(weekId)) {
+    throw new HttpsError(
+      "invalid-argument",
+      'Invalid weekId. Use format "2026-W12".',
+    );
+  }
+
+  const [uidSnap, userIdSnap, gamesSnap] = await Promise.all([
+    db
+      .collection("picks")
+      .where("uid", "==", uid)
+      .where("weekId", "==", weekId)
+      .get(),
+    db
+      .collection("picks")
+      .where("userId", "==", uid)
+      .where("weekId", "==", weekId)
+      .get(),
+    db.collection("games").where("weekId", "==", weekId).get(),
+  ]);
+
+  const pickMap = new Map<string, any>();
+
+  for (const doc of uidSnap.docs) {
+    pickMap.set(doc.id, { id: doc.id, ...doc.data() });
+  }
+
+  for (const doc of userIdSnap.docs) {
+    pickMap.set(doc.id, { id: doc.id, ...doc.data() });
+  }
+
+  const picks = Array.from(pickMap.values());
+  const games = gamesSnap.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+
+  return {
+    ok: true,
+    weekId,
+    picks,
+    games,
+  };
+});
+
+export const adminRescoreGame = onCall({ cors: true }, async (req) => {
+  try {
+    await requireAdmin(req);
+
+    const sportRaw = String(req.data?.sport ?? "")
+      .toUpperCase()
+      .trim();
+    const weekId = String(req.data?.weekId ?? "").trim();
+    const gameId = String(req.data?.gameId ?? "").trim();
+
+    if (sportRaw !== "NBA" && sportRaw !== "MLB") {
+      throw new HttpsError("invalid-argument", "Invalid sport.");
+    }
+
+    if (!weekId || !gameId) {
+      throw new HttpsError(
+        "invalid-argument",
+        "weekId and gameId are required.",
+      );
+    }
+
+    const sport = sportRaw as Sport;
+
+    const gameSnap = await db
+      .collection("games")
+      .where("sport", "==", sport)
+      .where("weekId", "==", weekId)
+      .where("gameId", "==", gameId)
+      .limit(1)
+      .get();
+
+    if (gameSnap.empty) {
+      throw new HttpsError("not-found", "Game not found.");
+    }
+
+    const gameDoc = gameSnap.docs[0];
+    const game = gameDoc.data() as any;
+
+    const status = String(game.status ?? "").toLowerCase();
+    if (status !== "final") {
+      throw new HttpsError("failed-precondition", "Game is not final.");
+    }
+
+    const picksSnap = await db
+      .collection("picks")
+      .where("sport", "==", sport)
+      .where("weekId", "==", weekId)
+      .where("gameId", "==", gameId)
+      .get();
+
+    if (picksSnap.empty) {
+      return { ok: true, rescored: 0, skipped: 0 };
+    }
+
+    let rescored = 0;
+    let skipped = 0;
+
+    await db.runTransaction(async (tx) => {
+      for (const docSnap of picksSnap.docs) {
+        const pick = docSnap.data() as any;
+
+        const result = computePickResult(game, pick);
+        const points = pointsForResult(result);
+
+        const alreadyCorrect =
+          pick.result === result && pick.pointsAwarded === points;
+
+        if (alreadyCorrect) {
+          skipped++;
+          continue;
+        }
+
+        tx.set(
+          docSnap.ref,
+          {
+            result,
+            pointsAwarded: points,
+            leaderboardApplied: true,
+            resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+
+        rescored++;
+      }
+    });
+
+    return {
+      ok: true,
+      sport,
+      weekId,
+      gameId,
+      rescored,
+      skipped,
+    };
+  } catch (error: any) {
+    console.error("[adminRescoreGame] FAILED", {
+      message: error?.message ?? null,
+      code: error?.code ?? null,
+      details: error?.details ?? null,
+      stack: error?.stack ?? null,
+    });
+
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError(
+      "internal",
+      error?.message ?? "adminRescoreGame failed",
+    );
+  }
+});
+//----------------------------------------------//
+
+export const autoRescoreFinalGames = onSchedule(
+  {
+    schedule: "every 15 minutes",
+    timeZone: "America/Puerto_Rico",
+  },
+  async () => {
+    const finalGamesSnap = await db
+      .collection("games")
+      .where("status", "==", "final")
+      .get();
+
+    if (finalGamesSnap.empty) {
+      console.log("[autoRescoreFinalGames] no final games found");
+      return;
+    }
+
+    let gamesChecked = 0;
+    let picksUpdated = 0;
+
+    for (const gameDoc of finalGamesSnap.docs) {
+      const game = gameDoc.data() as any;
+
+      const sportStr = String(game.sport ?? game.league ?? "").toUpperCase();
+      if (sportStr !== "NBA" && sportStr !== "MLB") continue;
+
+      const sport = sportStr as Sport;
+      const weekId = String(game.weekId ?? "").trim();
+      const gameId = String(game.gameId ?? "").trim();
+
+      if (!weekId || !gameId) continue;
+
+      const picksSnap = await db
+        .collection("picks")
+        .where("sport", "==", sport)
+        .where("weekId", "==", weekId)
+        .where("gameId", "==", gameId)
+        .get();
+
+      if (picksSnap.empty) {
+        gamesChecked++;
+        continue;
+      }
+
+      const batch = db.batch();
+      let updatedThisGame = 0;
+
+      for (const pickDoc of picksSnap.docs) {
+        const pick = pickDoc.data() as any;
+
+        const result = computePickResult(game, pick);
+        const points = pointsForResult(result);
+
+        const alreadyCorrect =
+          pick.result === result && pick.pointsAwarded === points;
+
+        if (alreadyCorrect) continue;
+
+        batch.set(
+          pickDoc.ref,
+          {
+            result,
+            pointsAwarded: points,
+            resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+
+        updatedThisGame++;
+      }
+
+      if (updatedThisGame > 0) {
+        await batch.commit();
+        picksUpdated += updatedThisGame;
+      }
+
+      gamesChecked++;
+    }
+
+    console.log("[autoRescoreFinalGames] done", {
+      gamesChecked,
+      picksUpdated,
+    });
+  },
+);
