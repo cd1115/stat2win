@@ -7,6 +7,7 @@ import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { cn } from "@/lib/cn";
 import { useUserEntitlements } from "@/lib/useUserEntitlements";
+import NotificationBell from "@/components/NotificationBell";
 
 export default function Topbar({
   onMenu,
@@ -92,13 +93,16 @@ export default function Topbar({
             </>
           )}
 
-          <button
-            className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/75 transition hover:text-white"
-            aria-label="Notifications"
-          >
-            <span>🔔</span>
-            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
-          </button>
+          {user ? (
+            <NotificationBell uid={user.uid} />
+          ) : (
+            <button
+              className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/75 transition hover:text-white"
+              aria-label="Notifications"
+            >
+              <span>🔔</span>
+            </button>
+          )}
 
           <div ref={wrapRef} className="relative">
             <button

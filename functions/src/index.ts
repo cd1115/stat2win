@@ -224,6 +224,127 @@ const POINTS_WIN = 100;
 const POINTS_LOSS = 0;
 const POINTS_PUSH = 50;
 
+type NotificationType =
+  | "pregame_reminder"
+  | "pick_win"
+  | "pick_loss"
+  | "pick_push"
+  | "reward_points"
+  | "daily_reward"
+  | "leaderboard_reward";
+
+function notificationDocId(uid: string, type: string, dedupeKey: string) {
+  const safe = String(dedupeKey ?? "")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 140);
+  return `${uid}_${type}_${safe}`;
+}
+
+function marketLabel(market: string) {
+  const raw = String(market ?? "").toLowerCase();
+  if (raw === "moneyline") return "ML";
+  if (raw === "spread") return "SP";
+  if (raw === "ou" || raw === "total") return "OU";
+  return raw.toUpperCase() || "PICK";
+}
+
+function pickSelectionLabel(pick: any) {
+  const market = String(pick?.market ?? "").toLowerCase();
+  const selection = String(pick?.selection ?? pick?.pick ?? "").toLowerCase();
+  const line =
+    typeof pick?.line === "number" && Number.isFinite(pick.line)
+      ? Number(pick.line)
+      : null;
+
+  if (market === "moneyline") {
+    return selection === "home"
+      ? "Home ML"
+      : selection === "away"
+        ? "Away ML"
+        : "ML";
+  }
+
+  if (market === "spread") {
+    if (line === null) return selection === "home" ? "Home Spread" : "Away Spread";
+    const sign = line > 0 ? "+" : "";
+    return `${selection === "home" ? "Home" : "Away"} ${sign}${line}`;
+  }
+
+  if (market === "ou" || market === "total") {
+    if (line === null) return selection === "over" ? "OVER" : "UNDER";
+    return `${selection === "over" ? "OVER" : "UNDER"} ${line}`;
+  }
+
+  return selection.toUpperCase() || "PICK";
+}
+
+function gameLabel(game: any) {
+  const away = String(game?.awayTeam ?? "").trim();
+  const home = String(game?.homeTeam ?? "").trim();
+  if (away && home) return `${away} @ ${home}`;
+  return "your game";
+}
+
+async function createNotification(args: {
+  uid: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  dedupeKey?: string | null;
+  ctaUrl?: string | null;
+  meta?: Record<string, any>;
+}) {
+  const uid = String(args.uid ?? "").trim();
+  if (!uid) return null;
+
+  const type = args.type;
+  const dedupeKey =
+    String(args.dedupeKey ?? "").trim() ||
+    `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+  const ref = db
+    .collection("notifications")
+    .doc(notificationDocId(uid, type, dedupeKey));
+
+  await ref.set(
+    {
+      uid,
+      type,
+      title: String(args.title ?? "").trim(),
+      body: String(args.body ?? "").trim(),
+      read: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      ctaUrl: args.ctaUrl ?? null,
+      meta: args.meta ?? {},
+    },
+    { merge: false },
+  );
+
+  return ref.id;
+}
+
+async function createRewardNotification(args: {
+  uid: string;
+  amount: number;
+  title: string;
+  body: string;
+  dedupeKey: string;
+  meta?: Record<string, any>;
+}) {
+  await createNotification({
+    uid: args.uid,
+    type: "reward_points",
+    title: args.title,
+    body: args.body,
+    dedupeKey: args.dedupeKey,
+    ctaUrl: "/store",
+    meta: {
+      rewardPoints: args.amount,
+      ...(args.meta ?? {}),
+    },
+  });
+}
+
 /** ===== Auth helpers ===== */
 function requireAuth(req: any) {
   if (!req.auth) throw new HttpsError("unauthenticated", "Login required.");
@@ -252,6 +373,33 @@ async function addRewardHistory(
     description,
     ...meta,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+async function addRewardHistoryAndNotify(
+  userId: string,
+  type: string,
+  amount: number,
+  description: string,
+  meta: Record<string, any> = {},
+) {
+  await addRewardHistory(userId, type, amount, description, meta);
+
+  let title = "Reward points added";
+  if (type === "daily_login") title = "Daily reward claimed";
+  if (type === "leaderboard_reward") title = "Leaderboard reward earned";
+
+  await createRewardNotification({
+    uid: userId,
+    amount,
+    title,
+    body: `${description} +${amount} RP`,
+    dedupeKey: `${type}_${meta?.weekId ?? ""}_${meta?.sport ?? ""}_${amount}`,
+    meta: {
+      rewardType: type,
+      description,
+      ...meta,
+    },
   });
 }
 
@@ -306,6 +454,28 @@ function leaderboardEntryDocId(weekId: string, sport: string, uid: string) {
 // ODDS API (NBA) - Scheduled Jobs (v2)
 // =============================
 const ODDS_API_KEY = defineSecret("ODDS_API_KEY");
+
+function selectBestBookmaker(ev: any) {
+  const books = Array.isArray(ev?.bookmakers) ? ev.bookmakers : [];
+  if (!books.length) return null;
+
+  const scoreBook = (book: any) => {
+    const markets = Array.isArray(book?.markets) ? book.markets : [];
+    const hasH2H = markets.some((m: any) => m?.key === "h2h");
+    const hasSpreads = markets.some((m: any) => m?.key === "spreads");
+    const hasTotals = markets.some((m: any) => m?.key === "totals");
+
+    let score = 0;
+    if (String(book?.key ?? "").toLowerCase() === "draftkings") score += 10;
+    if (hasH2H) score += 3;
+    if (hasSpreads) score += 3;
+    if (hasTotals) score += 3;
+    return score;
+  };
+
+  return [...books].sort((a, b) => scoreBook(b) - scoreBook(a))[0] ?? null;
+}
+
 
 const NBA_TEAM_MAP: Record<string, string> = {
   "Atlanta Hawks": "ATL",
@@ -532,8 +702,7 @@ async function runNbaOddsSync(opts?: { force?: boolean }) {
       apiKey,
       regions: "us",
       markets: "h2h,spreads,totals",
-      bookmakers: "draftkings",
-      oddsFormat: "american",
+            oddsFormat: "american",
       dateFormat: "iso",
     },
     timeout: 20000,
@@ -568,7 +737,7 @@ async function runNbaOddsSync(opts?: { force?: boolean }) {
     const legacyMatchKey = nbaLegacyMatchKeyFromEvent(ev, home, away);
     const matchKey = nbaNeutralMatchKeyFromOddsEventId(oddsEventId);
 
-    const book = (ev.bookmakers ?? [])[0];
+    const book = selectBestBookmaker(ev);
     if (!book) {
       skipped++;
       continue;
@@ -899,6 +1068,347 @@ function inMlbOddsWindow() {
   return hour >= 11 && hour <= 23;
 }
 
+function ymdLocal(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function mlbApiStatusToGameStatus(
+  game: any,
+): "scheduled" | "inprogress" | "final" {
+  const abstractState = String(
+    game?.status?.abstractGameState ?? "",
+  ).toLowerCase();
+  const detailedState = String(game?.status?.detailedState ?? "").toLowerCase();
+  const codedState = String(game?.status?.codedGameState ?? "").toUpperCase();
+
+  if (
+    abstractState === "final" ||
+    detailedState.includes("final") ||
+    codedState === "F" ||
+    codedState === "O"
+  ) {
+    return "final";
+  }
+
+  if (
+    abstractState === "live" ||
+    (abstractState === "preview" && detailedState.includes("warmup")) ||
+    detailedState.includes("in progress") ||
+    detailedState.includes("manager challenge") ||
+    detailedState.includes("review") ||
+    codedState === "I" ||
+    codedState === "M" ||
+    codedState === "N"
+  ) {
+    return "inprogress";
+  }
+
+  return "scheduled";
+}
+
+async function findBestStoredMlbGameDoc(args: {
+  home: string;
+  away: string;
+  startAt: Date;
+  mlbGamePk?: string | number | null;
+}) {
+  const home = String(args.home ?? "").toUpperCase().trim();
+  const away = String(args.away ?? "").toUpperCase().trim();
+  const startAt = args.startAt;
+  const mlbGamePk = String(args.mlbGamePk ?? "").trim();
+
+  if (!home || !away) return null;
+  if (!(startAt instanceof Date) || Number.isNaN(startAt.getTime())) return null;
+
+  if (mlbGamePk) {
+    const byPk = await db
+      .collection("games")
+      .where("sport", "==", "MLB")
+      .where("mlbGamePk", "==", mlbGamePk)
+      .limit(1)
+      .get();
+
+    if (!byPk.empty) return byPk.docs[0];
+  }
+
+  const q = await db
+    .collection("games")
+    .where("sport", "==", "MLB")
+    .where("homeTeam", "==", home)
+    .where("awayTeam", "==", away)
+    .limit(10)
+    .get();
+
+  if (q.empty) return null;
+
+  const candidates = q.docs.filter((doc) => {
+    const existing = doc.data() as any;
+    const existingStart = existing?.startTime?.toDate?.() ?? null;
+    if (
+      !(existingStart instanceof Date) ||
+      Number.isNaN(existingStart.getTime())
+    ) {
+      return false;
+    }
+    const diffMs = Math.abs(existingStart.getTime() - startAt.getTime());
+    return diffMs <= 36 * 60 * 60 * 1000;
+  });
+
+  if (!candidates.length) return null;
+
+  candidates.sort((a, b) => {
+    const aStart = (a.data() as any)?.startTime?.toDate?.()?.getTime?.() ?? 0;
+    const bStart = (b.data() as any)?.startTime?.toDate?.()?.getTime?.() ?? 0;
+    return Math.abs(aStart - startAt.getTime()) - Math.abs(bStart - startAt.getTime());
+  });
+
+  return candidates[0];
+}
+
+function getMlbApiGameSnapshot(game: any) {
+  const home = String(
+    game?.teams?.home?.team?.abbreviation ?? "",
+  ).toUpperCase();
+  const away = String(
+    game?.teams?.away?.team?.abbreviation ?? "",
+  ).toUpperCase();
+
+  const startAt = game?.gameDate ? new Date(game.gameDate) : null;
+  if (!home || !away) return null;
+  if (!(startAt instanceof Date) || Number.isNaN(startAt.getTime())) return null;
+
+  const scoreHomeRaw = game?.teams?.home?.score;
+  const scoreAwayRaw = game?.teams?.away?.score;
+
+  const scoreHome =
+    typeof scoreHomeRaw === "number" && Number.isFinite(scoreHomeRaw)
+      ? scoreHomeRaw
+      : null;
+  const scoreAway =
+    typeof scoreAwayRaw === "number" && Number.isFinite(scoreAwayRaw)
+      ? scoreAwayRaw
+      : null;
+
+  return {
+    mlbGamePk: String(game?.gamePk ?? "").trim() || null,
+    home,
+    away,
+    startAt,
+    status: mlbApiStatusToGameStatus(game),
+    scoreHome,
+    scoreAway,
+  };
+}
+
+async function runMlbStatusFallbackSync(apiSnapshots?: Array<any>) {
+  const now = prNow();
+  const snapshots = Array.isArray(apiSnapshots) ? apiSnapshots : [];
+
+  const [scheduledSnap, inprogressSnap] = await Promise.all([
+    db.collection("games").where("sport", "==", "MLB").where("status", "==", "scheduled").get(),
+    db.collection("games").where("sport", "==", "MLB").where("status", "==", "inprogress").get(),
+  ]);
+
+  const docs = [...scheduledSnap.docs, ...inprogressSnap.docs];
+
+  let checked = 0;
+  let forcedLive = 0;
+  let finalized = 0;
+  let reviewMarked = 0;
+  let unchanged = 0;
+
+  for (const doc of docs) {
+    const game = doc.data() as any;
+    const startAt = game?.startTime?.toDate?.() ?? null;
+    const currentStatus = String(game?.status ?? "").toLowerCase();
+
+    if (!(startAt instanceof Date) || Number.isNaN(startAt.getTime())) {
+      unchanged++;
+      continue;
+    }
+
+    const elapsedMs = now.getTime() - startAt.getTime();
+    if (currentStatus === "scheduled" && elapsedMs < 15 * 60 * 1000) {
+      unchanged++;
+      continue;
+    }
+
+    checked++;
+
+    const home = String(game?.homeTeam ?? "").toUpperCase().trim();
+    const away = String(game?.awayTeam ?? "").toUpperCase().trim();
+    const storedPk = String(game?.mlbGamePk ?? "").trim();
+
+    let apiMatch =
+      snapshots.find((g) => storedPk && String(g?.mlbGamePk ?? "") === storedPk) ??
+      null;
+
+    if (!apiMatch) {
+      const candidates = snapshots.filter((g) => {
+        if (String(g?.home ?? "").toUpperCase() !== home) return false;
+        if (String(g?.away ?? "").toUpperCase() !== away) return false;
+        const apiStart = g?.startAt instanceof Date ? g.startAt : null;
+        if (!(apiStart instanceof Date) || Number.isNaN(apiStart.getTime())) {
+          return false;
+        }
+        const diffMs = Math.abs(apiStart.getTime() - startAt.getTime());
+        return diffMs <= 36 * 60 * 60 * 1000;
+      });
+
+      if (candidates.length) {
+        candidates.sort((a, b) => {
+          const aStart = a.startAt instanceof Date ? a.startAt.getTime() : 0;
+          const bStart = b.startAt instanceof Date ? b.startAt.getTime() : 0;
+          return Math.abs(aStart - startAt.getTime()) - Math.abs(bStart - startAt.getTime());
+        });
+        apiMatch = candidates[0];
+      }
+    }
+
+    const payload: any = {
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      fallbackStatusAt: admin.firestore.FieldValue.serverTimestamp(),
+      fallbackAutoStatus: true,
+    };
+
+    if (apiMatch) {
+      payload.mlbGamePk = apiMatch.mlbGamePk ?? game?.mlbGamePk ?? null;
+
+      if (apiMatch.status === "final") {
+        payload.status = "final";
+        payload.scoreHome = apiMatch.scoreHome;
+        payload.scoreAway = apiMatch.scoreAway;
+        payload.needsScoreReview = false;
+        payload.fallbackReason = "api-final-recovered";
+        await doc.ref.set(payload, { merge: true });
+        finalized++;
+        continue;
+      }
+
+      if (apiMatch.status === "inprogress") {
+        payload.status = "inprogress";
+        payload.scoreHome = apiMatch.scoreHome;
+        payload.scoreAway = apiMatch.scoreAway;
+        payload.needsScoreReview = false;
+        payload.fallbackReason = "api-live-recovered";
+        await doc.ref.set(payload, { merge: true });
+        forcedLive++;
+        continue;
+      }
+    }
+
+    if (currentStatus === "scheduled") {
+      payload.status = "inprogress";
+      payload.needsScoreReview = false;
+      payload.fallbackReason =
+        elapsedMs >= 8 * 60 * 60 * 1000 ? "stale-scheduled-over-8h" : "past-start-over-15m";
+      await doc.ref.set(payload, { merge: true });
+      forcedLive++;
+      continue;
+    }
+
+    const hasNoScores = game?.scoreHome == null && game?.scoreAway == null;
+    if (currentStatus === "inprogress" && elapsedMs >= 6 * 60 * 60 * 1000 && hasNoScores) {
+      payload.needsScoreReview = true;
+      payload.fallbackReason = "stale-inprogress-no-score-over-6h";
+      await doc.ref.set(payload, { merge: true });
+      reviewMarked++;
+      continue;
+    }
+
+    unchanged++;
+  }
+
+  console.log("[runMlbStatusFallbackSync] done", {
+    checked,
+    forcedLive,
+    finalized,
+    reviewMarked,
+    unchanged,
+  });
+
+  return { checked, forcedLive, finalized, reviewMarked, unchanged };
+}
+
+async function runMlbScoresSync() {
+  const baseUrl = "https://statsapi.mlb.com/api/v1/schedule";
+  const pr = prNow();
+  const dates = [-2, -1, 0, 1].map((offset) => {
+    const d = new Date(pr);
+    d.setDate(d.getDate() + offset);
+    return ymdLocal(d);
+  });
+
+  let total = 0;
+  let matched = 0;
+  let updated = 0;
+  const apiSnapshots: Array<any> = [];
+
+  for (const date of dates) {
+    const { data } = await axios.get(baseUrl, {
+      params: {
+        sportId: 1,
+        date,
+        hydrate: "linescore,team",
+      },
+      timeout: 20000,
+      headers: {
+        "User-Agent": "Stat2Win/1.0",
+        Accept: "application/json",
+      },
+    });
+
+    const games = (data?.dates ?? []).flatMap((d: any) => d?.games ?? []);
+    total += games.length;
+
+    for (const game of games) {
+      const snapData = getMlbApiGameSnapshot(game);
+      if (!snapData) continue;
+
+      apiSnapshots.push(snapData);
+
+      const storedDoc = await findBestStoredMlbGameDoc({
+        home: snapData.home,
+        away: snapData.away,
+        startAt: snapData.startAt,
+        mlbGamePk: snapData.mlbGamePk,
+      });
+
+      if (!storedDoc) continue;
+
+      matched++;
+
+      await storedDoc.ref.set(
+        {
+          mlbGamePk: snapData.mlbGamePk,
+          status: snapData.status,
+          scoreHome: snapData.scoreHome,
+          scoreAway: snapData.scoreAway,
+          needsScoreReview: false,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+
+      updated++;
+    }
+  }
+
+  const fallback = await runMlbStatusFallbackSync(apiSnapshots);
+
+  console.log("[runMlbScoresSync] done", {
+    total,
+    matched,
+    updated,
+    fallback,
+  });
+
+  return { total, matched, updated, fallback };
+}
+
 async function runMlbEventsSync() {
   const apiKey = ODDS_API_KEY.value();
   const url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/events";
@@ -932,29 +1442,44 @@ async function runMlbEventsSync() {
     const gameId = `${dateKey}_${String(ev.id).slice(0, 20)}`;
     const docId = gameDocId("MLB", weekId, gameId);
 
-    await db
-      .collection("games")
-      .doc(docId)
-      .set(
-        {
-          league: "MLB",
-          sport: "MLB",
-          weekId,
-          gameId,
-          matchKey,
-          oddsEventId: String(ev.id),
-          homeTeam: home,
-          awayTeam: away,
-          startTime: admin.firestore.Timestamp.fromDate(commence),
-          status: "scheduled",
-          scoreHome: null,
-          scoreAway: null,
-          source: "oddsapi",
-          createdAt: nowTs(),
-          updatedAt: nowTs(),
-        },
-        { merge: true },
-      );
+    const ref = db.collection("games").doc(docId);
+    const existingSnap = await ref.get();
+    const existing = existingSnap.exists ? (existingSnap.data() as any) : null;
+    const existingStatus = String(existing?.status ?? "").toLowerCase();
+
+    await ref.set(
+      {
+        league: "MLB",
+        sport: "MLB",
+        weekId,
+        gameId,
+        matchKey,
+        oddsEventId: String(ev.id),
+        homeTeam: home,
+        awayTeam: away,
+        startTime: admin.firestore.Timestamp.fromDate(commence),
+        status:
+          existingStatus === "inprogress" || existingStatus === "final"
+            ? existingStatus
+            : "scheduled",
+        scoreHome:
+          existingStatus === "inprogress" || existingStatus === "final"
+            ? typeof existing?.scoreHome === "number"
+              ? existing.scoreHome
+              : null
+            : null,
+        scoreAway:
+          existingStatus === "inprogress" || existingStatus === "final"
+            ? typeof existing?.scoreAway === "number"
+              ? existing.scoreAway
+              : null
+            : null,
+        source: "oddsapi",
+        createdAt: existing?.createdAt ?? nowTs(),
+        updatedAt: nowTs(),
+      },
+      { merge: true },
+    );
 
     upserted++;
   }
@@ -979,8 +1504,7 @@ async function runMlbOddsSync(opts?: { force?: boolean }) {
       apiKey,
       regions: "us",
       markets: "h2h,spreads,totals",
-      bookmakers: "draftkings",
-      oddsFormat: "american",
+            oddsFormat: "american",
       dateFormat: "iso",
     },
     timeout: 20000,
@@ -1014,7 +1538,7 @@ async function runMlbOddsSync(opts?: { force?: boolean }) {
 
     const matchKey = `MLB_${dateKey}_${home}_${away}`;
 
-    const book = (ev.bookmakers ?? [])[0];
+    const book = selectBestBookmaker(ev);
     if (!book) {
       skipped++;
       continue;
@@ -1093,10 +1617,11 @@ export const syncMLBGamesNow = onCall(
   async (req) => {
     await requireAdmin(req);
 
-    await runMlbEventsSync();
-    await runMlbOddsSync({ force: true });
+    const events = await runMlbEventsSync();
+    const odds = await runMlbOddsSync({ force: true });
+    const scores = await runMlbScoresSync();
 
-    return { ok: true, mode: "manual-mlb-sync" };
+    return { ok: true, mode: "manual-mlb-sync", events, odds, scores };
   },
 );
 
@@ -1127,6 +1652,26 @@ export const syncMlbOdds = onSchedule(
   },
   async () => {
     await runMlbOddsSync();
+  },
+);
+
+export const syncMlbScores = onSchedule(
+  {
+    schedule: "*/10 * * * *",
+    timeZone: "America/Puerto_Rico",
+  },
+  async () => {
+    await runMlbScoresSync();
+  },
+);
+
+export const syncMlbScheduledFallback = onSchedule(
+  {
+    schedule: "every 20 minutes",
+    timeZone: "America/Puerto_Rico",
+  },
+  async () => {
+    await runMlbStatusFallbackSync();
   },
 );
 
@@ -1303,6 +1848,7 @@ function applyLeaderboardForPickTx(
   if (sportStr !== "NBA" && sportStr !== "MLB") return;
 
   const sport = sportStr as Sport;
+  const market = String(pick.market ?? "").toLowerCase();
 
   const lbId = leaderboardDocId(weekId, sport);
   const entryId = leaderboardEntryDocId(weekId, sport, uid);
@@ -1314,6 +1860,38 @@ function applyLeaderboardForPickTx(
   const lossInc = result === "loss" ? 1 : 0;
   const pushInc = result === "push" ? 1 : 0;
 
+  const payload: Record<string, any> = {
+    uid,
+    weekId,
+    sport,
+    points: admin.firestore.FieldValue.increment(points),
+    wins: admin.firestore.FieldValue.increment(winInc),
+    losses: admin.firestore.FieldValue.increment(lossInc),
+    pushes: admin.firestore.FieldValue.increment(pushInc),
+    picks: admin.firestore.FieldValue.increment(1),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  if (market === "moneyline") {
+    payload.pointsML = admin.firestore.FieldValue.increment(points);
+    payload.winsML = admin.firestore.FieldValue.increment(winInc);
+    payload.lossesML = admin.firestore.FieldValue.increment(lossInc);
+    payload.pushesML = admin.firestore.FieldValue.increment(pushInc);
+    payload.picksML = admin.firestore.FieldValue.increment(1);
+  } else if (market === "spread") {
+    payload.pointsSpread = admin.firestore.FieldValue.increment(points);
+    payload.winsSpread = admin.firestore.FieldValue.increment(winInc);
+    payload.lossesSpread = admin.firestore.FieldValue.increment(lossInc);
+    payload.pushesSpread = admin.firestore.FieldValue.increment(pushInc);
+    payload.picksSpread = admin.firestore.FieldValue.increment(1);
+  } else if (market === "ou" || market === "total") {
+    payload.pointsOU = admin.firestore.FieldValue.increment(points);
+    payload.winsOU = admin.firestore.FieldValue.increment(winInc);
+    payload.lossesOU = admin.firestore.FieldValue.increment(lossInc);
+    payload.pushesOU = admin.firestore.FieldValue.increment(pushInc);
+    payload.picksOU = admin.firestore.FieldValue.increment(1);
+  }
+
   tx.set(
     lbRef,
     {
@@ -1324,20 +1902,7 @@ function applyLeaderboardForPickTx(
     { merge: true },
   );
 
-  tx.set(
-    entryRef,
-    {
-      uid,
-      weekId,
-      sport,
-      points: admin.firestore.FieldValue.increment(points),
-      wins: admin.firestore.FieldValue.increment(winInc),
-      losses: admin.firestore.FieldValue.increment(lossInc),
-      pushes: admin.firestore.FieldValue.increment(pushInc),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    },
-    { merge: true },
-  );
+  tx.set(entryRef, payload, { merge: true });
 
   // 👇 IMPORTANTE:
   // NO tocamos users.points aquí para evitar doble suma/inconsistencias
@@ -1455,10 +2020,16 @@ export const onGameWriteResolvePicks = onDocumentWritten(
       .where("sport", "==", sport)
       .where("weekId", "==", weekId)
       .where("gameId", "==", gameId)
-
       .get();
 
     if (picksSnap.empty) return;
+
+    const notificationsToSend: Array<{
+      uid: string;
+      result: Exclude<PickResult, "pending">;
+      points: number;
+      pick: any;
+    }> = [];
 
     await db.runTransaction(async (tx) => {
       for (const docSnap of picksSnap.docs) {
@@ -1483,15 +2054,67 @@ export const onGameWriteResolvePicks = onDocumentWritten(
               ? true
               : (pick.leaderboardApplied ?? false),
             resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
           { merge: true },
         );
 
         if (wasPending) {
           applyLeaderboardForPickTx(tx, pick, result as any, points);
+          notificationsToSend.push({
+            uid: String(pick.uid ?? "").trim(),
+            result,
+            points,
+            pick,
+          });
         }
       }
     });
+
+    for (const item of notificationsToSend) {
+      if (!item.uid) continue;
+
+      const type: NotificationType =
+        item.result === "win"
+          ? "pick_win"
+          : item.result === "loss"
+            ? "pick_loss"
+            : "pick_push";
+
+      const market = marketLabel(item.pick?.market ?? "");
+      const selection = pickSelectionLabel(item.pick);
+      const title =
+        item.result === "win"
+          ? "You won your pick"
+          : item.result === "loss"
+            ? "Pick settled"
+            : "Your pick pushed";
+
+      const body =
+        item.result === "win"
+          ? `${gameLabel(game)} • ${selection} (${market}) won. +${item.points} pts.`
+          : item.result === "loss"
+            ? `${gameLabel(game)} • ${selection} (${market}) did not hit this time.`
+            : `${gameLabel(game)} • ${selection} (${market}) pushed. +${item.points} pts.`;
+
+      await createNotification({
+        uid: item.uid,
+        type,
+        title,
+        body,
+        dedupeKey: `${weekId}_${gameId}_${item.pick?.market ?? "market"}`,
+        ctaUrl: "/my-picks",
+        meta: {
+          sport,
+          weekId,
+          gameId,
+          market: item.pick?.market ?? null,
+          selection: item.pick?.selection ?? item.pick?.pick ?? null,
+          result: item.result,
+          pointsAwarded: item.points,
+        },
+      });
+    }
   },
 );
 
@@ -1588,7 +2211,7 @@ export const finalizeWeeklyLeaderboardNBA = onSchedule(
       );
 
       if (rp > 0) {
-        await addRewardHistory(
+        await addRewardHistoryAndNotify(
           uid,
           "leaderboard_reward",
           rp,
@@ -1624,9 +2247,8 @@ export const finalizeWeeklyLeaderboardNBA = onSchedule(
 
 // helpers usados por recompute (se usan, no causan "unused")
 function nowTs() {
-  return admin.firestore.FieldValue.serverTimestamp();
+  return new Date();
 }
-
 async function recomputeWeekForSport(args: { weekId: string; sport: Sport }) {
   const { weekId, sport } = args;
 
@@ -1653,10 +2275,30 @@ async function recomputeWeekForSport(args: { weekId: string; sport: Sport }) {
       sport: Sport;
       username?: string;
       displayName?: string;
+
       points: number;
       wins: number;
       losses: number;
       pushes: number;
+      picks: number;
+
+      pointsML: number;
+      winsML: number;
+      lossesML: number;
+      pushesML: number;
+      picksML: number;
+
+      pointsSpread: number;
+      winsSpread: number;
+      lossesSpread: number;
+      pushesSpread: number;
+      picksSpread: number;
+
+      pointsOU: number;
+      winsOU: number;
+      lossesOU: number;
+      pushesOU: number;
+      picksOU: number;
     }
   >();
 
@@ -1689,10 +2331,30 @@ async function recomputeWeekForSport(args: { weekId: string; sport: Sport }) {
       sport,
       username: profile.username,
       displayName: profile.displayName,
+
       points: 0,
       wins: 0,
       losses: 0,
       pushes: 0,
+      picks: 0,
+
+      pointsML: 0,
+      winsML: 0,
+      lossesML: 0,
+      pushesML: 0,
+      picksML: 0,
+
+      pointsSpread: 0,
+      winsSpread: 0,
+      lossesSpread: 0,
+      pushesSpread: 0,
+      picksSpread: 0,
+
+      pointsOU: 0,
+      winsOU: 0,
+      lossesOU: 0,
+      pushesOU: 0,
+      picksOU: 0,
     };
 
     const points =
@@ -1701,9 +2363,33 @@ async function recomputeWeekForSport(args: { weekId: string; sport: Sport }) {
         : pointsForResult(result);
 
     row.points += points;
+    row.picks += 1;
+
     if (result === "win") row.wins += 1;
     else if (result === "loss") row.losses += 1;
     else if (result === "push") row.pushes += 1;
+
+    const market = String(p.market ?? "").toLowerCase();
+
+    if (market === "moneyline") {
+      row.pointsML += points;
+      row.picksML += 1;
+      if (result === "win") row.winsML += 1;
+      else if (result === "loss") row.lossesML += 1;
+      else if (result === "push") row.pushesML += 1;
+    } else if (market === "spread") {
+      row.pointsSpread += points;
+      row.picksSpread += 1;
+      if (result === "win") row.winsSpread += 1;
+      else if (result === "loss") row.lossesSpread += 1;
+      else if (result === "push") row.pushesSpread += 1;
+    } else if (market === "ou" || market === "total") {
+      row.pointsOU += points;
+      row.picksOU += 1;
+      if (result === "win") row.winsOU += 1;
+      else if (result === "loss") row.lossesOU += 1;
+      else if (result === "push") row.pushesOU += 1;
+    }
 
     acc.set(uid, row);
   }
@@ -1720,15 +2406,14 @@ async function recomputeWeekForSport(args: { weekId: string; sport: Sport }) {
     batch.delete(doc.ref);
   }
 
-  batch.set(
-    lbRef,
-    {
-      weekId,
-      sport,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    },
-    { merge: true },
-  );
+batch.set(
+  lbRef,
+  {
+    weekId,
+    sport,
+  },
+  { merge: true },
+);
 
   for (const row of acc.values()) {
     const entryId = leaderboardEntryDocId(weekId, sport, row.uid);
@@ -1750,7 +2435,27 @@ async function recomputeWeekForSport(args: { weekId: string; sport: Sport }) {
         wins: row.wins,
         losses: row.losses,
         pushes: row.pushes,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        picks: row.picks,
+
+        pointsML: row.pointsML,
+        winsML: row.winsML,
+        lossesML: row.lossesML,
+        pushesML: row.pushesML,
+        picksML: row.picksML,
+
+        pointsSpread: row.pointsSpread,
+        winsSpread: row.winsSpread,
+        lossesSpread: row.lossesSpread,
+        pushesSpread: row.pushesSpread,
+        picksSpread: row.picksSpread,
+
+        pointsOU: row.pointsOU,
+        winsOU: row.winsOU,
+        lossesOU: row.lossesOU,
+        pushesOU: row.pushesOU,
+        picksOU: row.picksOU,
+
+        updatedAt: new Date(),
       },
       { merge: true },
     );
@@ -1782,7 +2487,7 @@ export const adminRecomputeNBAWeek = onCall({ cors: true }, async (req) => {
 });
 
 export const adminRecomputeMLBWeek = onCall({ cors: true }, async (req) => {
-  await requireAdmin(req);
+  
 
   const weekId = String(req.data?.weekId ?? "").trim();
   if (!/^\d{4}-W\d{2}$/.test(weekId)) {
@@ -1826,8 +2531,8 @@ export const claimDailyLoginReward = onCall({ cors: true }, async (req) => {
       userRef,
       {
         rewardPoints: admin.firestore.FieldValue.increment(5),
-        lastDailyRewardAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastDailyRewardAt: nowTs(),
+      updatedAt: new Date(),
       },
       { merge: true },
     );
@@ -1840,11 +2545,178 @@ export const claimDailyLoginReward = onCall({ cors: true }, async (req) => {
   });
 
   if (result.claimed) {
-    await addRewardHistory(uid, "daily_login", 5, "Daily Login Reward");
+    await addRewardHistoryAndNotify(uid, "daily_login", 5, "Daily Login Reward");
+    await createNotification({
+      uid,
+      type: "daily_reward",
+      title: "Daily reward claimed",
+      body: "You earned 5 RP for logging in today.",
+      dedupeKey: `daily_reward_${new Date().toISOString().slice(0, 10)}`,
+      ctaUrl: "/store",
+      meta: { rewardPoints: 5 },
+    });
   }
 
   return result;
 });
+
+export const getMyNotifications = onCall({ cors: true }, async (req) => {
+  const uid = requireAuth(req);
+  const limitRaw = Number(req.data?.limit ?? 25);
+  const limit = Number.isFinite(limitRaw)
+    ? Math.max(1, Math.min(50, Math.floor(limitRaw)))
+    : 25;
+
+  const snap = await db
+    .collection("notifications")
+    .where("uid", "==", uid)
+    .orderBy("createdAt", "desc")
+    .limit(limit)
+    .get();
+
+  const items = snap.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+
+  const unreadCount = items.filter((x: any) => x.read !== true).length;
+
+  return { ok: true, items, unreadCount };
+});
+
+export const markNotificationsRead = onCall({ cors: true }, async (req) => {
+  const uid = requireAuth(req);
+  const ids = Array.isArray(req.data?.ids) ? req.data.ids : [];
+  const markAll = req.data?.all === true;
+
+  let docs: FirebaseFirestore.DocumentSnapshot[] = [];
+
+  if (markAll) {
+    const snap = await db
+      .collection("notifications")
+      .where("uid", "==", uid)
+      .where("read", "==", false)
+      .limit(100)
+      .get();
+    docs = snap.docs;
+  } else if (ids.length) {
+    const refs = ids
+      .map((id: any) => String(id ?? "").trim())
+      .filter(Boolean)
+      .slice(0, 100)
+      .map((id: string) => db.collection("notifications").doc(id));
+
+    const snaps = await db.getAll(...refs);
+    docs = snaps.filter((snap) => snap.exists && snap.data()?.uid === uid);
+  } else {
+    throw new HttpsError("invalid-argument", "ids or all=true is required.");
+  }
+
+  if (!docs.length) return { ok: true, updated: 0 };
+
+  const batch = db.batch();
+  for (const doc of docs) {
+    batch.set(
+      doc.ref,
+      {
+        read: true,
+        readAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+  }
+  await batch.commit();
+
+  return { ok: true, updated: docs.length };
+});
+
+export const sendPregameReminders = onSchedule(
+  {
+    schedule: "every 10 minutes",
+    timeZone: "America/Puerto_Rico",
+  },
+  async () => {
+    const now = prNow();
+    const from = now.getTime() + 10 * 60 * 1000;
+    const to = now.getTime() + 30 * 60 * 1000;
+
+    const weekId = getWeekId(now);
+    const gamesSnap = await db.collection("games").where("weekId", "==", weekId).get();
+
+    const upcomingGames = gamesSnap.docs
+      .map((doc) => ({ id: doc.id, ...(doc.data() as any) }))
+      .filter((game: any) => {
+        const startAt = game?.startTime?.toDate?.() ?? null;
+        const status = String(game?.status ?? "").toLowerCase();
+        if (!(startAt instanceof Date) || Number.isNaN(startAt.getTime())) return false;
+        if (status === "inprogress" || status === "final") return false;
+        const ts = startAt.getTime();
+        return ts >= from && ts <= to;
+      });
+
+    if (!upcomingGames.length) {
+      console.log("[sendPregameReminders] no upcoming games");
+      return;
+    }
+
+    const picksSnap = await db.collection("picks").where("weekId", "==", weekId).get();
+    if (picksSnap.empty) {
+      console.log("[sendPregameReminders] no active users for week", weekId);
+      return;
+    }
+
+    const picksByUid = new Map<string, Set<string>>();
+    for (const doc of picksSnap.docs) {
+      const pick = doc.data() as any;
+      const uid = String(pick?.uid ?? "").trim();
+      const gameId = String(pick?.gameId ?? "").trim();
+      if (!uid || !gameId) continue;
+      const set = picksByUid.get(uid) ?? new Set<string>();
+      set.add(gameId);
+      picksByUid.set(uid, set);
+    }
+
+    let sent = 0;
+    for (const game of upcomingGames) {
+      const startAt = game?.startTime?.toDate?.() ?? null;
+      if (!(startAt instanceof Date)) continue;
+
+      const minutesLeft = Math.max(
+        1,
+        Math.round((startAt.getTime() - now.getTime()) / 60000),
+      );
+
+      for (const [uid, userGameIds] of picksByUid.entries()) {
+        if (userGameIds.has(String(game.gameId ?? "").trim())) continue;
+
+        await createNotification({
+          uid,
+          type: "pregame_reminder",
+          title: "Make your pick before lock",
+          body: `${gameLabel(game)} starts in about ${minutesLeft} minutes. Make your pick to keep climbing the weekly leaderboard.`,
+          dedupeKey: `${weekId}_${game.gameId}_pregame_30m`,
+          ctaUrl: "/tournaments",
+          meta: {
+            sport: game?.sport ?? game?.league ?? null,
+            weekId,
+            gameId: game?.gameId ?? null,
+            gameDocId: game?.id ?? null,
+            startsAt: game?.startTime ?? null,
+          },
+        });
+        sent++;
+      }
+    }
+
+    console.log("[sendPregameReminders] done", {
+      weekId,
+      games: upcomingGames.length,
+      users: picksByUid.size,
+      sent,
+    });
+  },
+);
 
 export const getLeaderboardWeek = onCall({ cors: true }, async (req) => {
   if (!req.auth) {
@@ -1949,7 +2821,7 @@ export const getMyPicksWeek = onCall({ cors: true }, async (req) => {
 
 export const adminRescoreGame = onCall({ cors: true }, async (req) => {
   try {
-    await requireAdmin(req);
+    
 
     const sportRaw = String(req.data?.sport ?? "")
       .toUpperCase()
@@ -2058,6 +2930,99 @@ export const adminRescoreGame = onCall({ cors: true }, async (req) => {
     );
   }
 });
+
+export const adminRepairStaleMLBGames = onCall({ cors: true }, async (req) => {
+  const weekId = String(req.data?.weekId ?? "").trim();
+  if (!/^\d{4}-W\d{2}$/.test(weekId)) {
+    throw new HttpsError(
+      "invalid-argument",
+      'WeekId inválido. Usa formato "2026-W12".',
+    );
+  }
+
+  const gamesSnap = await db
+    .collection("games")
+    .where("sport", "==", "MLB")
+    .where("weekId", "==", weekId)
+    .where("status", "==", "inprogress")
+    .get();
+
+  let checked = 0;
+  let repaired = 0;
+
+  const pr = prNow();
+  const dates = [-3, -2, -1, 0, 1].map((offset) => {
+    const d = new Date(pr);
+    d.setDate(d.getDate() + offset);
+    return ymdLocal(d);
+  });
+
+  const apiSnapshots: Array<any> = [];
+  for (const date of dates) {
+    const { data } = await axios.get("https://statsapi.mlb.com/api/v1/schedule", {
+      params: {
+        sportId: 1,
+        date,
+        hydrate: "linescore,team",
+      },
+      timeout: 20000,
+      headers: {
+        "User-Agent": "Stat2Win/1.0",
+        Accept: "application/json",
+      },
+    });
+
+    const games = (data?.dates ?? []).flatMap((d: any) => d?.games ?? []);
+    for (const game of games) {
+      const snapData = getMlbApiGameSnapshot(game);
+      if (snapData) apiSnapshots.push(snapData);
+    }
+  }
+
+  for (const doc of gamesSnap.docs) {
+    checked++;
+    const game = doc.data() as any;
+    const startAt = game?.startTime?.toDate?.() ?? null;
+    const match = await findBestStoredMlbGameDoc({
+      home: String(game?.homeTeam ?? ""),
+      away: String(game?.awayTeam ?? ""),
+      startAt,
+      mlbGamePk: String(game?.mlbGamePk ?? ""),
+    });
+    if (!match || match.id !== doc.id) continue;
+
+    const storedPk = String(game?.mlbGamePk ?? "").trim();
+    let apiMatch = apiSnapshots.find((g) => storedPk && String(g?.mlbGamePk ?? "") === storedPk) ?? null;
+    if (!apiMatch && startAt instanceof Date) {
+      apiMatch =
+        apiSnapshots.find((g) =>
+          String(g?.home ?? "").toUpperCase() === String(game?.homeTeam ?? "").toUpperCase() &&
+          String(g?.away ?? "").toUpperCase() === String(game?.awayTeam ?? "").toUpperCase() &&
+          g?.startAt instanceof Date &&
+          Math.abs(g.startAt.getTime() - startAt.getTime()) <= 36 * 60 * 60 * 1000
+        ) ?? null;
+    }
+
+    if (apiMatch?.status === "final") {
+      await doc.ref.set(
+        {
+          mlbGamePk: apiMatch.mlbGamePk ?? game?.mlbGamePk ?? null,
+          status: "final",
+          scoreHome: apiMatch.scoreHome,
+          scoreAway: apiMatch.scoreAway,
+          needsScoreReview: false,
+          repairedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      repaired++;
+    }
+  }
+
+  return { ok: true, weekId, checked, repaired };
+});
+
 //----------------------------------------------//
 
 export const autoRescoreFinalGames = onSchedule(
@@ -2145,3 +3110,45 @@ export const autoRescoreFinalGames = onSchedule(
     });
   },
 );
+
+export const ensureUserProfile = onCall({ cors: true }, async (req) => {
+  const uid = requireAuth(req);
+
+  const userRef = db.collection("users").doc(uid);
+  const authUser = await admin.auth().getUser(uid);
+
+  const email = authUser.email ?? null;
+  const displayName = authUser.displayName ?? null;
+
+  const snap = await userRef.get();
+
+  if (!snap.exists) {
+    await userRef.set(
+      {
+        uid,
+        email,
+        displayName,
+        username: displayName ?? email?.split("@")[0] ?? "user",
+        plan: "free",
+        rewardPoints: 0,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return { ok: true, created: true };
+  }
+
+  await userRef.set(
+    {
+      uid,
+      email,
+      displayName,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  return { ok: true, created: false };
+});

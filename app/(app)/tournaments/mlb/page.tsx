@@ -1,16 +1,14 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Protected from "@/components/protected";
 import { useAuth } from "@/lib/auth-context";
 import { getWeekId, getWeekRangeLabel } from "@/lib/week";
 import { listenGamesByWeekAndSport, type GameDoc } from "@/lib/firestore-games";
-import {
-  listenMyPicksByWeekAndSport,
-  upsertPick,
-  deletePickForMarket,
-  type PickDoc,
-} from "@/lib/firestore-picks";
+import type { PickDoc } from "@/lib/firestore-picks";
+import { httpsCallable } from "firebase/functions";
+import { functions } from "@/lib/firebase";
 
 type StatusTab = "all" | "scheduled" | "inprogress" | "final";
 type MarketTab = "all" | "moneyline" | "spread" | "ou";
@@ -44,9 +42,52 @@ function scoreText(g: GameDoc) {
   return `${String(g.awayTeam ?? "").trim()} ${away} • ${String(g.homeTeam ?? "").trim()} ${home}`;
 }
 
-function isClosed(g: GameDoc) {
-  return g.status === "inprogress" || g.status === "final";
+function effectiveStatus(g: GameDoc): "scheduled" | "inprogress" | "final" | "locked" {
+  const raw = String(g?.status ?? "").toLowerCase();
+  if (raw === "final") return "final";
+  if (raw === "inprogress") return "inprogress";
+
+  const startMs =
+    g?.startTime?.toMillis?.() ?? g?.startTime?.toDate?.()?.getTime?.() ?? null;
+
+  if (typeof startMs === "number" && Number.isFinite(startMs)) {
+    if (Date.now() >= startMs) return "inprogress";
+  }
+
+  if (raw === "locked") return "locked";
+  return "scheduled";
 }
+
+function isClosed(g: GameDoc) {
+  const status = effectiveStatus(g);
+  return status === "inprogress" || status === "final" || status === "locked";
+}
+
+function isSamePrDay(ts: any, now = new Date()) {
+  const d: Date =
+    ts?.toDate?.() instanceof Date
+      ? ts.toDate()
+      : ts instanceof Date
+        ? ts
+        : typeof ts === "number"
+          ? new Date(ts)
+          : null as any;
+  if (!d) return false;
+
+  const prDate = new Date(
+    d.toLocaleString("en-US", { timeZone: "America/Puerto_Rico" }),
+  );
+  const prNowDate = new Date(
+    now.toLocaleString("en-US", { timeZone: "America/Puerto_Rico" }),
+  );
+
+  return (
+    prDate.getFullYear() === prNowDate.getFullYear() &&
+    prDate.getMonth() === prNowDate.getMonth() &&
+    prDate.getDate() === prNowDate.getDate()
+  );
+}
+
 
 function isEpochMs13(v: unknown) {
   return typeof v === "string" && /^\d{13}$/.test(v);
@@ -54,12 +95,13 @@ function isEpochMs13(v: unknown) {
 
 function stableGameKey(g: any): string {
   const candidates = [
+    g?.gameId,
     g?.matchKey,
     g?.oddsEventId,
-    g?.gameId,
     g?.legacyMatchKey,
     g?.id,
   ];
+
   for (const candidate of candidates) {
     if (typeof candidate === "string" && candidate.trim()) {
       const x = candidate.trim();
@@ -74,24 +116,33 @@ function stableGameKey(g: any): string {
 }
 
 function dedupeGames(rows: GameDoc[]) {
-  const seen = new Set<string>();
-  const out: GameDoc[] = [];
+  const map = new Map<string, GameDoc>();
+
+  const quality = (g: any) => {
+    let score = 0;
+    if (g?.mlbGamePk) score += 5;
+    if (g?.markets?.moneyline) score += 2;
+    if (g?.markets?.spread?.homeLine != null || g?.markets?.spread?.awayLine != null) score += 3;
+    if (g?.markets?.total?.line != null) score += 3;
+    if (g?.scoreHome != null || g?.scoreAway != null) score += 2;
+    if (g?.status === "final" || g?.status === "inprogress") score += 1;
+    return score;
+  };
 
   for (const g of rows) {
     const startMs =
       g?.startTime?.toMillis?.() ?? g?.startTime?.toDate?.()?.getTime?.() ?? 0;
 
-    const key =
-      stableGameKey(g) ||
-      `${String(g?.awayTeam ?? "").trim()}_${String(g?.homeTeam ?? "").trim()}_${startMs}`;
-
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(g);
+    const key = `${String(g?.awayTeam ?? "").trim()}_${String(g?.homeTeam ?? "").trim()}_${startMs}`;
+    const prev = map.get(key);
+    if (!prev || quality(g) > quality(prev)) {
+      map.set(key, g);
+    }
   }
 
-  return out;
+  return Array.from(map.values());
 }
+
 
 function getSpread(g: any) {
   const sp = g?.markets?.spread ?? g?.markets?.sp ?? null;
@@ -142,7 +193,7 @@ function badgeBase() {
 
 function marketChip(active: boolean) {
   return [
-    "rounded-xl border px-4 py-2 text-sm transition",
+    "rounded-xl border px-3 py-2 text-sm transition",
     active
       ? "border-white/20 bg-white/10 text-white"
       : "border-white/10 bg-black/20 text-white/80 hover:bg-white/5",
@@ -157,12 +208,13 @@ function showLine(n: number | null, prefixPlus = true) {
 
 function pickCell(active: boolean, disabled: boolean) {
   if (disabled) {
-    return "rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-left opacity-50 cursor-not-allowed";
+    return "rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-left opacity-50 cursor-not-allowed";
   }
+
   return [
-    "rounded-2xl border px-4 py-4 text-left transition",
+    "rounded-2xl border px-3 py-3 text-left transition",
     active
-      ? "border-blue-400/50 bg-blue-500/10 text-blue-100 shadow-[0_0_0_1px_rgba(96,165,250,.25),0_0_24px_rgba(37,99,235,.12)]"
+      ? "border-blue-400/70 bg-blue-500/15 text-white shadow-[0_0_0_1px_rgba(59,130,246,.35),0_0_28px_rgba(59,130,246,.22)]"
       : "border-white/10 bg-black/20 text-white/80 hover:bg-white/5",
   ].join(" ");
 }
@@ -174,9 +226,129 @@ function marketLabel(m: MarketTab) {
   return "O/U";
 }
 
-function teamBadge(team: string) {
-  return team.slice(0, 3).toUpperCase();
+function formatCallableError(e: any) {
+  const code = e?.code ? String(e.code) : "";
+  const msg = e?.message ? String(e.message) : "Unknown error";
+  const details =
+    e?.details != null
+      ? typeof e.details === "string"
+        ? e.details
+        : JSON.stringify(e.details)
+      : "";
+
+  return [code && `(${code})`, msg, details && `details=${details}`]
+    .filter(Boolean)
+    .join(" | ");
 }
+
+const MLB_TEAM_CODES: Record<string, string> = {
+  "Arizona Diamondbacks": "ARI",
+  "Atlanta Braves": "ATL",
+  "Baltimore Orioles": "BAL",
+  "Boston Red Sox": "BOS",
+  "Chicago Cubs": "CHC",
+  "Chicago White Sox": "CWS",
+  "Cincinnati Reds": "CIN",
+  "Cleveland Guardians": "CLE",
+  "Colorado Rockies": "COL",
+  "Detroit Tigers": "DET",
+  "Houston Astros": "HOU",
+  "Kansas City Royals": "KC",
+  "Los Angeles Angels": "LAA",
+  "LA Angels": "LAA",
+  "Los Angeles Dodgers": "LAD",
+  "Miami Marlins": "MIA",
+  "Milwaukee Brewers": "MIL",
+  "Minnesota Twins": "MIN",
+  "New York Mets": "NYM",
+  "New York Yankees": "NYY",
+  Athletics: "OAK",
+  "Oakland Athletics": "OAK",
+  "Philadelphia Phillies": "PHI",
+  "Pittsburgh Pirates": "PIT",
+  "San Diego Padres": "SD",
+  "Seattle Mariners": "SEA",
+  "San Francisco Giants": "SF",
+  "St. Louis Cardinals": "STL",
+  "Tampa Bay Rays": "TB",
+  "Texas Rangers": "TEX",
+  "Toronto Blue Jays": "TOR",
+  "Washington Nationals": "WSH",
+};
+
+function normalizeMlbCode(value: string) {
+  const v = String(value || "")
+    .trim()
+    .toUpperCase();
+  const alias: Record<string, string> = {
+    KCR: "KC",
+    CHW: "CWS",
+    SFG: "SF",
+    SDP: "SD",
+    TBR: "TB",
+    WAS: "WSH",
+  };
+  return alias[v] ?? v;
+}
+
+function teamAbbrFrom(g: any, side: "home" | "away") {
+  const explicit =
+    side === "home"
+      ? (g?.homeTeamAbbr ?? g?.homeAbbr ?? g?.teams?.homeAbbr)
+      : (g?.awayTeamAbbr ?? g?.awayAbbr ?? g?.teams?.awayAbbr);
+
+  if (typeof explicit === "string" && explicit.trim()) {
+    return normalizeMlbCode(explicit);
+  }
+
+  const name = side === "home" ? g?.homeTeam : g?.awayTeam;
+
+  if (typeof name === "string" && MLB_TEAM_CODES[name]) {
+    return MLB_TEAM_CODES[name];
+  }
+
+  const fromName =
+    typeof name === "string" && name.trim()
+      ? name.trim().slice(0, 3).toUpperCase()
+      : "";
+
+  return normalizeMlbCode(fromName || (side === "home" ? "HOME" : "AWAY"));
+}
+
+function TeamLogo({ code, size = 40 }: { code: string; size?: number }) {
+  const [imgError, setImgError] = useState(false);
+  const safeCode = String(code || "")
+    .trim()
+    .toUpperCase();
+  const src = `/teams/mlb/${safeCode}.png`;
+
+  return (
+    <div
+      className="flex items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5"
+      style={{ width: size, height: size }}
+    >
+      {!imgError ? (
+        <Image
+          src={src}
+          alt={safeCode}
+          width={size}
+          height={size}
+          className="h-full w-full object-contain"
+          onError={() => setImgError(true)}
+        />
+      ) : (
+        <span className="text-sm font-semibold text-white">
+          {safeCode.slice(0, 3)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+type OptimisticPick = Partial<PickDoc> & {
+  market: "moneyline" | "spread" | "ou";
+  pick: "home" | "away" | "over" | "under";
+};
 
 export default function MlbTournamentPage() {
   const { user } = useAuth();
@@ -206,12 +378,24 @@ export default function MlbTournamentPage() {
   const [statusFilter, setStatusFilter] = useState<StatusTab>("all");
   const [market, setMarket] = useState<MarketTab>("all");
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [optimisticPicks, setOptimisticPicks] = useState<
+    Record<string, OptimisticPick>
+  >({});
+
+  const placePickFn = useMemo(() => httpsCallable(functions, "placePick"), []);
+  const getMyPicksWeekFn = useMemo(() => httpsCallable(functions, "getMyPicksWeek"), []);
 
   function pushNotice(message: string) {
     setNotice(message);
     if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
     noticeTimerRef.current = window.setTimeout(() => setNotice(null), 3500);
   }
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     setErr(null);
@@ -228,6 +412,7 @@ export default function MlbTournamentPage() {
   }, [sport, weekId]);
 
   useEffect(() => {
+    let cancelled = false;
     setErr(null);
 
     if (!user?.uid || !weekId) {
@@ -235,26 +420,51 @@ export default function MlbTournamentPage() {
       return;
     }
 
-    const unsub = listenMyPicksByWeekAndSport(
-      user.uid,
-      weekId,
-      sport as any,
-      (rows) => setMyPicks(rows),
-    );
+    (async () => {
+      try {
+        const res: any = await getMyPicksWeekFn({ weekId });
+        if (cancelled) return;
+        setMyPicks(Array.isArray(res?.data?.picks) ? res.data.picks : []);
+      } catch (e: any) {
+        if (cancelled) return;
+        setErr(formatCallableError(e));
+        setMyPicks([]);
+      }
+    })();
 
-    return () => unsub?.();
-  }, [user?.uid, weekId, sport]);
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid, weekId, getMyPicksWeekFn]);
 
   const pickMap = useMemo(() => {
     const m = new Map<string, PickDoc>();
+
+    const put = (id: any, market: any, p: PickDoc) => {
+      if (!id || !market) return;
+      const key = `${String(id).trim()}:${String(market).trim()}`;
+      if (!m.has(key)) m.set(key, p);
+    };
+
     for (const p of myPicks) {
-      m.set(`${p.gameId}:${p.market}`, p);
+      put((p as any).gameId, (p as any).market, p);
+      put((p as any).externalGameId, (p as any).market, p);
+      put((p as any).gameDocId, (p as any).market, p);
+      put((p as any).id, (p as any).market, p);
     }
+
     return m;
   }, [myPicks]);
 
   const filteredGames = useMemo(() => {
     let rows = [...games];
+
+    const currentWeekId = getWeekId(new Date());
+    const isViewingCurrentWeek = weekId === currentWeekId;
+
+    if (isViewingCurrentWeek) {
+      rows = rows.filter((g) => isSamePrDay(g.startTime, new Date()));
+    }
 
     rows.sort((a, b) => {
       const at = a.startTime?.toMillis?.() ?? 0;
@@ -276,9 +486,7 @@ export default function MlbTournamentPage() {
     }
 
     if (statusFilter !== "all") {
-      rows = rows.filter(
-        (g) => (g.status ?? "").toLowerCase() === statusFilter,
-      );
+      rows = rows.filter((g) => effectiveStatus(g) === statusFilter);
     }
 
     if (market === "spread") {
@@ -298,14 +506,10 @@ export default function MlbTournamentPage() {
   }, [games, q, statusFilter, market]);
 
   const groupedGames = useMemo(() => {
-    const live = filteredGames.filter(
-      (g) => (g.status ?? "").toLowerCase() === "inprogress",
-    );
-    const final = filteredGames.filter(
-      (g) => (g.status ?? "").toLowerCase() === "final",
-    );
+    const live = filteredGames.filter((g) => effectiveStatus(g) === "inprogress");
+    const final = filteredGames.filter((g) => effectiveStatus(g) === "final");
     const scheduled = filteredGames.filter((g) => {
-      const s = (g.status ?? "").toLowerCase();
+      const s = effectiveStatus(g);
       return s !== "inprogress" && s !== "final";
     });
 
@@ -317,7 +521,7 @@ export default function MlbTournamentPage() {
     if (live.length)
       sections.push({ title: "LIVE", rows: live, liveDot: true });
     if (scheduled.length) sections.push({ title: "Today", rows: scheduled });
-    if (final.length) sections.push({ title: "Final", rows: final });
+    if (final.length) sections.push({ title: "Final Today", rows: final });
 
     return sections;
   }, [filteredGames]);
@@ -331,99 +535,513 @@ export default function MlbTournamentPage() {
   }) {
     if (!user?.uid) return;
 
-    const gameKey = stableGameKey(args.g);
+    const gameKey = String(
+      (args.g as any).gameId ?? stableGameKey(args.g) ?? "",
+    ).trim();
+    const gameKeySafe = gameKey || String((args.g as any).id ?? "").trim();
 
-    if (!gameKey) {
+    if (!gameKeySafe) {
       pushNotice("Este juego no tiene un gameId válido todavía.");
       return;
     }
 
     if (isClosed(args.g)) return;
 
-    const existing = pickMap.get(`${gameKey}:${args.market}`);
+    const key = `${gameKeySafe}:${args.market}`;
+    const existing =
+      (optimisticPicks[key] as any) ||
+      pickMap.get(`${gameKeySafe}:${args.market}`) ||
+      pickMap.get(`${gameKey}:${args.market}`) ||
+      pickMap.get(`${String((args.g as any).id ?? "").trim()}:${args.market}`);
+
+    const selectionForMarket = (() => {
+      if (args.market === "moneyline") {
+        return args.pick === "home"
+          ? teamAbbrFrom(args.g, "home")
+          : teamAbbrFrom(args.g, "away");
+      }
+      return args.selection;
+    })();
+
+    const canonicalSelection = args.pick;
+    const marketKey =
+      args.market === "moneyline"
+        ? "ml"
+        : args.market === "spread"
+          ? "sp"
+          : "ou";
+    const teamAbbr =
+      args.market === "moneyline"
+        ? args.pick === "home"
+          ? teamAbbrFrom(args.g, "home")
+          : teamAbbrFrom(args.g, "away")
+        : null;
 
     if (existing?.pick === args.pick) {
-      const key = `${gameKey}:${args.market}`;
       setSavingKey(key);
       setErr(null);
       setNotice(null);
 
+      setOptimisticPicks((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+
       try {
-        await deletePickForMarket({
+        const payload = {
           uid: user.uid,
+          sport,
+          sportKey: "mlb",
+          league: "mlb",
           weekId,
-          sport: sport as any,
-          gameId: gameKey,
+          gameId: (args.g as any).gameId ?? gameKey,
+          externalGameId: gameKey,
+          gameDocId: (args.g as any).id,
           market: args.market,
-        });
+          marketKey,
+          pick: canonicalSelection,
+          selection: canonicalSelection,
+          teamAbbr,
+          line: args.line,
+          selectionLegacy: args.selection,
+          selectionForMarket,
+          clear: true,
+        };
+
+        await placePickFn(payload);
       } catch (e: any) {
-        setErr(String(e?.message ?? e));
+        setOptimisticPicks((prev) => ({
+          ...prev,
+          [key]: {
+            market: args.market,
+            pick: existing?.pick ?? canonicalSelection,
+            ...(existing?.selectionForMarket
+              ? { selectionForMarket: existing.selectionForMarket }
+              : {}),
+            ...(existing?.teamAbbr ? { teamAbbr: existing.teamAbbr } : {}),
+          } as any,
+        }));
+        setErr(formatCallableError(e));
       } finally {
         setSavingKey(null);
       }
       return;
     }
 
-    const key = `${gameKey}:${args.market}`;
+    if (args.market === "moneyline") {
+      const existingSpread =
+        optimisticPicks[`${gameKeySafe}:spread`] ||
+        pickMap.get(`${gameKeySafe}:spread`) ||
+        pickMap.get(`${gameKey}:spread`) ||
+        pickMap.get(`${String((args.g as any).id ?? "").trim()}:spread`);
+      if ((existingSpread as any)?.pick) {
+        pushNotice(
+          "No puedes combinar Moneyline y Spread en el mismo juego. Quita el pick de Spread y luego selecciona Moneyline.",
+        );
+        return;
+      }
+    }
+
+    if (args.market === "spread") {
+      const existingML =
+        optimisticPicks[`${gameKeySafe}:moneyline`] ||
+        pickMap.get(`${gameKeySafe}:moneyline`) ||
+        pickMap.get(`${gameKey}:moneyline`) ||
+        pickMap.get(`${String((args.g as any).id ?? "").trim()}:moneyline`);
+      if ((existingML as any)?.pick) {
+        pushNotice(
+          "No puedes combinar Spread y Moneyline en el mismo juego. Quita el pick de Moneyline y luego selecciona Spread.",
+        );
+        return;
+      }
+    }
+
     setSavingKey(key);
     setErr(null);
     setNotice(null);
 
-    try {
-      await upsertPick({
-        uid: user.uid,
-        sport: sport as any,
-        weekId,
-        gameId: gameKey,
+    setOptimisticPicks((prev) => ({
+      ...prev,
+      [key]: {
         market: args.market,
-        pick: args.pick as any,
+        pick: canonicalSelection,
+        selectionForMarket,
+        ...(teamAbbr ? { teamAbbr } : {}),
+      } as any,
+    }));
+
+    try {
+      const payload = {
+        uid: user.uid,
+        sport,
+        sportKey: "mlb",
+        league: "mlb",
+        weekId,
+        gameId: (args.g as any).gameId ?? gameKey,
+        externalGameId: gameKey,
+        gameDocId: (args.g as any).id,
+        market: args.market,
+        marketKey,
+        pick: canonicalSelection,
+        selection: canonicalSelection,
+        teamAbbr,
         line: args.line,
-        selection: args.selection,
-      });
+        selectionLegacy: args.selection,
+        selectionForMarket,
+      };
+
+      await placePickFn(payload);
     } catch (e: any) {
-      setErr(String(e?.message ?? e));
+      setOptimisticPicks((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      setErr(formatCallableError(e));
     } finally {
       setSavingKey(null);
     }
   }
 
-  return (
-    <Protected>
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-6 md:p-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+  const renderGame = (g: GameDoc, idx: number) => {
+    const effective = effectiveStatus(g);
+    const closed = isClosed(g);
+    const start = fmtStart(g.startTime);
+    const gameKey = String((g as any).gameId ?? stableGameKey(g) ?? "").trim();
+    const gameKeySafe = gameKey || String((g as any).id ?? "").trim();
+    const key = gameKeySafe || `${g.awayTeam}-${g.homeTeam}-${idx}`;
+
+    const pickFor = (mk: "moneyline" | "spread" | "ou") => {
+      const k = `${gameKeySafe}:${mk}`;
+      return (
+        (optimisticPicks[k] as any) ||
+        pickMap.get(`${gameKeySafe}:${mk}`) ||
+        pickMap.get(`${gameKey}:${mk}`) ||
+        pickMap.get(`${String((g as any).id ?? "").trim()}:${mk}`) ||
+        null
+      );
+    };
+
+    const pickML = pickFor("moneyline");
+    const pickSpread = pickFor("spread");
+    const pickOU = pickFor("ou");
+
+    const { homeLine, awayLine } = getSpread(g);
+    const { line: totalLine } = getTotal(g);
+
+    const showMoneyline = market === "moneyline" || market === "all";
+    const showSpread = market === "spread" || market === "all";
+    const showOU = market === "ou" || market === "all";
+
+    const awayAbbr = teamAbbrFrom(g, "away");
+    const homeAbbr = teamAbbrFrom(g, "home");
+
+    const mlPicked =
+      (pickML as any)?.selectionForMarket ?? (pickML as any)?.teamAbbr ?? null;
+    const mlAwayActive =
+      mlPicked === awayAbbr ||
+      (mlPicked == null && (pickML as any)?.pick === "away");
+    const mlHomeActive =
+      mlPicked === homeAbbr ||
+      (mlPicked == null && (pickML as any)?.pick === "home");
+
+    return (
+      <div
+        key={key}
+        className="rounded-2xl border border-white/10 bg-black/20 p-4"
+      >
+        <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-3xl font-bold tracking-tight">
-                MLB Tournament
-              </h1>
-              <span className={badgeBase()}>Week {weekId}</span>
-              <span className={badgeBase()}>{weekLabel}</span>
-              <span className={badgeBase()}>
-                Picks: <span className="text-white/80">{myPicks.length}</span>
-              </span>
-              <span className={badgeBase()}>
-                View:{" "}
-                <span className="text-white/80">{marketLabel(market)}</span>
-              </span>
+            <div className="text-lg font-semibold">
+              {g.awayTeam} <span className="text-white/40">@</span> {g.homeTeam}
             </div>
 
-            <div className="mt-2 text-white/60">
-              Picks lock automatically at tip-off. Points update when games go{" "}
-              <span className="text-white/80">FINAL</span>.
+            <div className="mt-1 text-sm text-white/80">{scoreText(g)}</div>
+
+            <div className="mt-2 flex flex-wrap gap-2 text-xs text-white/70">
+              <span className={badgeBase()}>
+                Status: <span className="text-white/80">{effective}</span>
+              </span>
+
+              {start ? <span className={badgeBase()}>{start}</span> : null}
+
+              {effective === "final" ? (
+                <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-white/80">
+                  Final
+                </span>
+              ) : effective === "inprogress" ? (
+                <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-200">
+                  Locked
+                </span>
+              ) : closed ? (
+                <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-200">
+                  Locked
+                </span>
+              ) : (
+                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200">
+                  Open
+                </span>
+              )}
             </div>
           </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search teams…"
-              className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-2 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/20 sm:w-64"
-            />
+          <div className="text-xs text-white/60">
+            <div>
+              ML:{" "}
+              <span className="text-white/80">
+                {mlPicked === awayAbbr
+                  ? g.awayTeam
+                  : mlPicked === homeAbbr
+                    ? g.homeTeam
+                    : (pickML as any)?.pick
+                      ? (pickML as any).pick === "home"
+                        ? g.homeTeam
+                        : g.awayTeam
+                      : "—"}
+              </span>
+            </div>
+            <div>
+              SP:{" "}
+              <span className="text-white/80">
+                {pickSpread?.pick
+                  ? pickSpread.pick === "home"
+                    ? `${g.homeTeam} ${showLine(homeLine)}`
+                    : `${g.awayTeam} ${showLine(awayLine)}`
+                  : "—"}
+              </span>
+            </div>
+            <div>
+              O/U:{" "}
+              <span className="text-white/80">
+                {pickOU?.pick
+                  ? `${pickOU.pick === "over" ? "Over" : "Under"} ${showLine(totalLine, false)}`
+                  : "—"}
+              </span>
+            </div>
+          </div>
+        </div>
 
-            <div className="flex rounded-xl border border-white/10 bg-black/20 p-1 text-xs">
-              {(["all", "scheduled", "inprogress", "final"] as StatusTab[]).map(
-                (k) => (
+        <div
+          className={[
+            "grid gap-3",
+            showSpread && showOU && showMoneyline
+              ? "grid-cols-[1fr_180px_180px_160px]"
+              : showSpread && showOU
+                ? "grid-cols-[1fr_180px_180px]"
+                : showSpread && showMoneyline
+                  ? "grid-cols-[1fr_180px_160px]"
+                  : showOU && showMoneyline
+                    ? "grid-cols-[1fr_180px_160px]"
+                    : showSpread || showOU
+                      ? "grid-cols-[1fr_180px]"
+                      : "grid-cols-[1fr_160px]",
+          ].join(" ")}
+        >
+          <div />
+          {showSpread ? (
+            <div className="text-xs font-semibold text-white/60">Handicap</div>
+          ) : null}
+          {showOU ? (
+            <div className="text-xs font-semibold text-white/60">Total</div>
+          ) : null}
+          {showMoneyline ? (
+            <div className="text-xs font-semibold text-white/60">Moneyline</div>
+          ) : null}
+
+          <div className="flex items-center gap-3">
+            <TeamLogo code={awayAbbr} />
+            <div className="min-w-0">
+              <div className="truncate text-base font-semibold">
+                {g.awayTeam}
+              </div>
+            </div>
+          </div>
+
+          {showSpread ? (
+            <button
+              className={pickCell(
+                pickSpread?.pick === "away",
+                closed || !gameKeySafe || typeof awayLine !== "number",
+              )}
+              disabled={closed || !gameKeySafe || typeof awayLine !== "number"}
+              onClick={() =>
+                savePick({
+                  g,
+                  market: "spread",
+                  pick: "away",
+                  line: awayLine,
+                  selection: "AWAY",
+                })
+              }
+            >
+              <div className="text-base font-semibold">
+                {g.awayTeam} {showLine(awayLine)}
+              </div>
+            </button>
+          ) : null}
+
+          {showOU ? (
+            <button
+              className={pickCell(
+                pickOU?.pick === "over",
+                closed || !gameKeySafe || typeof totalLine !== "number",
+              )}
+              disabled={closed || !gameKeySafe || typeof totalLine !== "number"}
+              onClick={() =>
+                savePick({
+                  g,
+                  market: "ou",
+                  pick: "over",
+                  line: totalLine,
+                  selection: "OVER",
+                })
+              }
+            >
+              <div className="text-base font-semibold">
+                O {showLine(totalLine, false)}
+              </div>
+            </button>
+          ) : null}
+
+          {showMoneyline ? (
+            <button
+              className={pickCell(mlAwayActive, closed || !gameKeySafe)}
+              disabled={closed || !gameKeySafe}
+              onClick={() =>
+                savePick({
+                  g,
+                  market: "moneyline",
+                  pick: "away",
+                  line: null,
+                  selection: "AWAY",
+                })
+              }
+            >
+              <div className="text-base font-semibold">{g.awayTeam}</div>
+            </button>
+          ) : null}
+
+          <div className="flex items-center gap-3">
+            <TeamLogo code={homeAbbr} />
+            <div className="min-w-0">
+              <div className="truncate text-base font-semibold">
+                {g.homeTeam}
+              </div>
+            </div>
+          </div>
+
+          {showSpread ? (
+            <button
+              className={pickCell(
+                pickSpread?.pick === "home",
+                closed || !gameKeySafe || typeof homeLine !== "number",
+              )}
+              disabled={closed || !gameKeySafe || typeof homeLine !== "number"}
+              onClick={() =>
+                savePick({
+                  g,
+                  market: "spread",
+                  pick: "home",
+                  line: homeLine,
+                  selection: "HOME",
+                })
+              }
+            >
+              <div className="text-base font-semibold">
+                {g.homeTeam} {showLine(homeLine)}
+              </div>
+            </button>
+          ) : null}
+
+          {showOU ? (
+            <button
+              className={pickCell(
+                pickOU?.pick === "under",
+                closed || !gameKeySafe || typeof totalLine !== "number",
+              )}
+              disabled={closed || !gameKeySafe || typeof totalLine !== "number"}
+              onClick={() =>
+                savePick({
+                  g,
+                  market: "ou",
+                  pick: "under",
+                  line: totalLine,
+                  selection: "UNDER",
+                })
+              }
+            >
+              <div className="text-base font-semibold">
+                U {showLine(totalLine, false)}
+              </div>
+            </button>
+          ) : null}
+
+          {showMoneyline ? (
+            <button
+              className={pickCell(mlHomeActive, closed || !gameKeySafe)}
+              disabled={closed || !gameKeySafe}
+              onClick={() =>
+                savePick({
+                  g,
+                  market: "moneyline",
+                  pick: "home",
+                  line: null,
+                  selection: "HOME",
+                })
+              }
+            >
+              <div className="text-base font-semibold">{g.homeTeam}</div>
+            </button>
+          ) : null}
+        </div>
+
+        {savingKey && gameKeySafe && savingKey.startsWith(`${gameKeySafe}:`) ? (
+          <div className="mt-3 text-xs text-white/50">Saving…</div>
+        ) : null}
+      </div>
+    );
+  };
+
+  return (
+    <Protected>
+      <div className="px-6 py-6">
+        <div className="mx-auto max-w-6xl">
+          <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="text-3xl font-bold tracking-tight">
+                  MLB Tournament
+                </h1>
+                <span className={badgeBase()}>Week {weekId}</span>
+                <span className={badgeBase()}>{weekLabel}</span>
+                <span className={badgeBase()}>
+                  Picks: <span className="text-white/80">{myPicks.length}</span>
+                </span>
+                <span className={badgeBase()}>
+                  View:{" "}
+                  <span className="text-white/80">{marketLabel(market)}</span>
+                </span>
+              </div>
+
+              <p className="mt-2 text-white/60">
+                Picks lock automatically at tip-off. Points update when games go{" "}
+                <span className="text-white/80">FINAL</span>.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search teams…"
+                className="w-full sm:w-64 rounded-xl border border-white/10 bg-black/30 px-4 py-2 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/20"
+              />
+
+              <div className="flex rounded-xl border border-white/10 bg-black/20 p-1 text-xs">
+                {(
+                  ["all", "scheduled", "inprogress", "final"] as StatusTab[]
+                ).map((k) => (
                   <button
                     key={k}
                     onClick={() => setStatusFilter(k)}
@@ -436,379 +1054,89 @@ export default function MlbTournamentPage() {
                   >
                     {k === "all" ? "All" : k[0].toUpperCase() + k.slice(1)}
                   </button>
-                ),
-              )}
+                ))}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="mt-5 flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setWeekOffset((v) => v - 1)}
-            className="rounded-xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white/80 hover:bg-white/5"
-          >
-            ← Prev Week
-          </button>
-
-          <button
-            onClick={() => setWeekOffset(0)}
-            className="rounded-xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white/80 hover:bg-white/5"
-          >
-            Current Week
-          </button>
-
-          <button
-            onClick={() => setWeekOffset((v) => v + 1)}
-            className="rounded-xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white/80 hover:bg-white/5"
-          >
-            Next Week →
-          </button>
-        </div>
-
-        {err ? (
-          <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-            {err}
-          </div>
-        ) : null}
-
-        {notice ? (
-          <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-            {notice}
-          </div>
-        ) : null}
-
-        <div className="mt-5 flex flex-wrap gap-2">
-          {(["all", "moneyline", "spread", "ou"] as MarketTab[]).map((m) => (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
             <button
-              key={m}
-              onClick={() => setMarket(m)}
-              className={marketChip(market === m)}
+              onClick={() => setWeekOffset((v) => v - 1)}
+              className="rounded-xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white/80 hover:bg-white/5"
             >
-              {marketLabel(m)}
+              ← Prev Week
             </button>
-          ))}
-        </div>
 
-        <div className="mt-6 rounded-2xl border border-white/10 bg-black/30 p-5">
-          <div className="text-sm text-white/70">
-            {filteredGames.length} game(s)
+            <button
+              onClick={() => setWeekOffset(0)}
+              className="rounded-xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white/80 hover:bg-white/5"
+            >
+              Current Week
+            </button>
+
+            <button
+              onClick={() => setWeekOffset((v) => v + 1)}
+              className="rounded-xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white/80 hover:bg-white/5"
+            >
+              Next Week →
+            </button>
           </div>
 
-          <div className="mt-4 space-y-5">
-            {groupedGames.map((section) => (
-              <div key={section.title}>
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    {section.liveDot ? (
-                      <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
-                    ) : null}
-                    <div className="text-lg font-semibold">{section.title}</div>
-                  </div>
-                  <div className="text-sm text-white/50">
-                    {section.rows.length} game(s)
-                  </div>
-                </div>
+          {err ? (
+            <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+              {err}
+            </div>
+          ) : null}
 
-                <div className="space-y-3">
-                  {section.rows.map((g, idx) => {
-                    const closed = isClosed(g);
-                    const start = fmtStart(g.startTime);
-                    const gameKey = stableGameKey(g);
-                    const key = gameKey || `${g.awayTeam}-${g.homeTeam}-${idx}`;
+          {notice ? (
+            <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+              {notice}
+            </div>
+          ) : null}
 
-                    const pickML = gameKey
-                      ? pickMap.get(`${gameKey}:moneyline`)
-                      : undefined;
-                    const pickSpread = gameKey
-                      ? pickMap.get(`${gameKey}:spread`)
-                      : undefined;
-                    const pickOU = gameKey
-                      ? pickMap.get(`${gameKey}:ou`)
-                      : undefined;
-
-                    const { homeLine, awayLine } = getSpread(g);
-                    const { line: totalLine } = getTotal(g);
-
-                    return (
-                      <div
-                        key={key}
-                        className="rounded-2xl border border-white/10 bg-black/20 p-5"
-                      >
-                        <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                          <div>
-                            <div className="text-2xl font-bold">
-                              {g.awayTeam}{" "}
-                              <span className="text-white/40">@</span>{" "}
-                              {g.homeTeam}
-                            </div>
-
-                            <div className="mt-1 text-white/80">
-                              {scoreText(g)}
-                            </div>
-
-                            <div className="mt-3 flex flex-wrap gap-2 text-xs text-white/70">
-                              <span className={badgeBase()}>
-                                Status:{" "}
-                                <span className="text-white/80">
-                                  {g.status}
-                                </span>
-                              </span>
-                              {start ? (
-                                <span className={badgeBase()}>{start}</span>
-                              ) : null}
-                              {closed ? (
-                                <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-200">
-                                  Locked
-                                </span>
-                              ) : (
-                                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200">
-                                  Open
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="text-sm text-white/70">
-                            <div>
-                              ML:{" "}
-                              <span className="text-white/90">
-                                {pickML?.pick
-                                  ? pickML.pick === "home"
-                                    ? g.homeTeam
-                                    : g.awayTeam
-                                  : "—"}
-                              </span>
-                            </div>
-                            <div>
-                              SP:{" "}
-                              <span className="text-white/90">
-                                {pickSpread?.pick
-                                  ? pickSpread.pick === "home"
-                                    ? `${g.homeTeam} ${showLine(homeLine)}`
-                                    : `${g.awayTeam} ${showLine(awayLine)}`
-                                  : "—"}
-                              </span>
-                            </div>
-                            <div>
-                              O/U:{" "}
-                              <span className="text-white/90">
-                                {pickOU?.pick
-                                  ? `${pickOU.pick === "over" ? "Over" : "Under"} ${showLine(totalLine, false)}`
-                                  : "—"}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[170px_minmax(0,1fr)] lg:items-start">
-                          <div className="space-y-4">
-                            <div className="flex items-center gap-4">
-                              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-lg font-bold text-white/90">
-                                {teamBadge(String(g.awayTeam ?? ""))}
-                              </div>
-                              <div className="text-2xl font-bold tracking-tight">
-                                {g.awayTeam}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-4">
-                              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-lg font-bold text-white/90">
-                                {teamBadge(String(g.homeTeam ?? ""))}
-                              </div>
-                              <div className="text-2xl font-bold tracking-tight">
-                                {g.homeTeam}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                            <div>
-                              <div className="mb-2 text-sm text-white/60">
-                                Handicap
-                              </div>
-                              <div className="flex flex-col gap-3">
-                                <button
-                                  className={pickCell(
-                                    pickSpread?.pick === "away",
-                                    closed ||
-                                      !gameKey ||
-                                      typeof awayLine !== "number",
-                                  )}
-                                  disabled={
-                                    closed ||
-                                    !gameKey ||
-                                    typeof awayLine !== "number"
-                                  }
-                                  onClick={() =>
-                                    savePick({
-                                      g,
-                                      market: "spread",
-                                      pick: "away",
-                                      line: awayLine,
-                                      selection: "AWAY",
-                                    })
-                                  }
-                                >
-                                  <div className="text-2xl font-bold leading-none">
-                                    {g.awayTeam} {showLine(awayLine)}
-                                  </div>
-                                </button>
-
-                                <button
-                                  className={pickCell(
-                                    pickSpread?.pick === "home",
-                                    closed ||
-                                      !gameKey ||
-                                      typeof homeLine !== "number",
-                                  )}
-                                  disabled={
-                                    closed ||
-                                    !gameKey ||
-                                    typeof homeLine !== "number"
-                                  }
-                                  onClick={() =>
-                                    savePick({
-                                      g,
-                                      market: "spread",
-                                      pick: "home",
-                                      line: homeLine,
-                                      selection: "HOME",
-                                    })
-                                  }
-                                >
-                                  <div className="text-2xl font-bold leading-none">
-                                    {g.homeTeam} {showLine(homeLine)}
-                                  </div>
-                                </button>
-                              </div>
-                            </div>
-
-                            <div>
-                              <div className="mb-2 text-sm text-white/60">
-                                Total
-                              </div>
-                              <div className="flex flex-col gap-3">
-                                <button
-                                  className={pickCell(
-                                    pickOU?.pick === "over",
-                                    closed ||
-                                      !gameKey ||
-                                      typeof totalLine !== "number",
-                                  )}
-                                  disabled={
-                                    closed ||
-                                    !gameKey ||
-                                    typeof totalLine !== "number"
-                                  }
-                                  onClick={() =>
-                                    savePick({
-                                      g,
-                                      market: "ou",
-                                      pick: "over",
-                                      line: totalLine,
-                                      selection: "OVER",
-                                    })
-                                  }
-                                >
-                                  <div className="text-2xl font-bold leading-none">
-                                    O {showLine(totalLine, false)}
-                                  </div>
-                                </button>
-
-                                <button
-                                  className={pickCell(
-                                    pickOU?.pick === "under",
-                                    closed ||
-                                      !gameKey ||
-                                      typeof totalLine !== "number",
-                                  )}
-                                  disabled={
-                                    closed ||
-                                    !gameKey ||
-                                    typeof totalLine !== "number"
-                                  }
-                                  onClick={() =>
-                                    savePick({
-                                      g,
-                                      market: "ou",
-                                      pick: "under",
-                                      line: totalLine,
-                                      selection: "UNDER",
-                                    })
-                                  }
-                                >
-                                  <div className="text-2xl font-bold leading-none">
-                                    U {showLine(totalLine, false)}
-                                  </div>
-                                </button>
-                              </div>
-                            </div>
-
-                            <div>
-                              <div className="mb-2 text-sm text-white/60">
-                                Moneyline
-                              </div>
-                              <div className="flex flex-col gap-3">
-                                <button
-                                  className={pickCell(
-                                    pickML?.pick === "away",
-                                    closed || !gameKey,
-                                  )}
-                                  disabled={closed || !gameKey}
-                                  onClick={() =>
-                                    savePick({
-                                      g,
-                                      market: "moneyline",
-                                      pick: "away",
-                                      line: null,
-                                      selection: "AWAY",
-                                    })
-                                  }
-                                >
-                                  <div className="text-2xl font-bold leading-none">
-                                    {g.awayTeam}
-                                  </div>
-                                </button>
-
-                                <button
-                                  className={pickCell(
-                                    pickML?.pick === "home",
-                                    closed || !gameKey,
-                                  )}
-                                  disabled={closed || !gameKey}
-                                  onClick={() =>
-                                    savePick({
-                                      g,
-                                      market: "moneyline",
-                                      pick: "home",
-                                      line: null,
-                                      selection: "HOME",
-                                    })
-                                  }
-                                >
-                                  <div className="text-2xl font-bold leading-none">
-                                    {g.homeTeam}
-                                  </div>
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        {savingKey && savingKey.startsWith(`${gameKey}:`) ? (
-                          <div className="mt-3 text-xs text-white/50">
-                            Saving…
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+          <div className="mb-4 flex flex-wrap gap-2">
+            {(["all", "moneyline", "spread", "ou"] as MarketTab[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => setMarket(m)}
+                className={marketChip(market === m)}
+              >
+                {marketLabel(m)}
+              </button>
             ))}
           </div>
 
-          <div className="mt-6 text-xs text-white/50">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="text-sm text-white/70">
+              {filteredGames.length} game(s)
+            </div>
+
+            <div className="mt-4 space-y-5">
+              {groupedGames.map((section) => (
+                <div key={section.title}>
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      {section.liveDot ? (
+                        <span className="inline-flex h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                      ) : null}
+                      <div className="text-sm font-semibold text-white/90">
+                        {section.title}
+                      </div>
+                    </div>
+                    <div className="text-xs text-white/50">
+                      {section.rows.length} game(s)
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {section.rows.map((g, idx) => renderGame(g, idx))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4 text-xs text-white/50">
             Scoring: Win 100 • Loss 0 • Push 50.
           </div>
         </div>

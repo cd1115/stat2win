@@ -29,34 +29,35 @@ type PerfSport = "ALL" | SportKey;
 
 const AVAILABLE_SPORTS: SportKey[] = ["NBA", "NFL", "SOCCER", "MLB"];
 const NBA_LOGO_BASE = "/teams";
+const MLB_LOGO_BASE = "/teams/mlb";
 
 const SPORT_META: Record<
   SportKey,
-  { label: string; emoji: string; accent: string; soft: string }
+  { label: string; accent: string; soft: string; leagueLogo?: string }
 > = {
   NBA: {
     label: "NBA",
-    emoji: "🏀",
     accent: "text-blue-300",
     soft: "bg-blue-500/10 border-blue-500/20",
+    leagueLogo: "/leagues/nba.svg",
   },
   NFL: {
     label: "NFL",
-    emoji: "🏈",
     accent: "text-emerald-300",
     soft: "bg-emerald-500/10 border-emerald-500/20",
+    leagueLogo: "/leagues/nfl.png",
   },
   SOCCER: {
     label: "SOCCER",
-    emoji: "⚽",
     accent: "text-green-300",
     soft: "bg-green-500/10 border-green-500/20",
+    leagueLogo: "/leagues/soccer.png",
   },
   MLB: {
     label: "MLB",
-    emoji: "⚾",
     accent: "text-red-300",
     soft: "bg-red-500/10 border-red-500/20",
+    leagueLogo: "/leagues/mlb.svg",
   },
 };
 
@@ -360,15 +361,42 @@ function inferOutcomeFromPoints(points?: number | null, final?: boolean) {
 }
 
 function teamLogoSrc(sport: string, abbr?: string) {
-  if (String(sport).toUpperCase() !== "NBA") return null;
   const code = String(abbr || "")
     .trim()
     .toUpperCase();
   if (!code) return null;
 
-  return `${NBA_LOGO_BASE}/${code}.png`;
+  const sportKey = String(sport).toUpperCase();
+  if (sportKey === "NBA") return `${NBA_LOGO_BASE}/${code}.png`;
+  if (sportKey === "MLB") return `${MLB_LOGO_BASE}/${code}.png`;
+  return null;
 }
 
+function LeagueBadge({
+  sport,
+  size = 18,
+}: {
+  sport: string;
+  size?: number;
+}) {
+  const league = String(sport || "").trim().toLowerCase();
+
+  if (!league) return null;
+
+  return (
+    <div
+      className="flex items-center justify-center rounded-lg bg-white/10"
+      style={{ width: size + 18, height: size + 18 }}
+    >
+      <img
+        src={`/leagues/${league}.svg`}
+        alt={sport}
+        className="object-contain brightness-0 invert"
+        style={{ width: size, height: size }}
+      />
+    </div>
+  );
+}
 function TeamBadge({
   sport,
   abbr,
@@ -469,6 +497,7 @@ export default function PicksPage() {
   const { user } = useAuth();
 
   const [viewTab, setViewTab] = useState<ViewTab>("picks");
+  const [picksSportFilter, setPicksSportFilter] = useState<PerfSport>("ALL");
   const [perfSport, setPerfSport] = useState<PerfSport>("ALL");
   const [weekOffset, setWeekOffset] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -499,7 +528,11 @@ export default function PicksPage() {
       setGames(bundle.games);
     } catch (e: any) {
       console.error("My Picks refresh error:", e);
-      setErr(e?.message ?? "Could not load picks.");
+     setErr(
+  [e?.code, e?.message, e?.details ? JSON.stringify(e.details) : ""]
+    .filter(Boolean)
+    .join(" | ") || "Could not load picks."
+);
     } finally {
       setLoading(false);
     }
@@ -592,9 +625,15 @@ export default function PicksPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return enriched;
 
     return enriched.filter((r) => {
+      const sportRaw = String(r.pick.sport || "").toUpperCase();
+      if (picksSportFilter !== "ALL" && sportRaw !== picksSportFilter) {
+        return false;
+      }
+
+      if (!q) return true;
+
       const ht = String(
         r.game?.homeTeamAbbr || r.game?.homeTeam || r.game?.home || "",
       ).toLowerCase();
@@ -611,7 +650,22 @@ export default function PicksPage() {
         String(r.pick.gameId).includes(q)
       );
     });
-  }, [enriched, search]);
+  }, [enriched, search, picksSportFilter]);
+
+  const pickCountsBySport = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const row of enriched) {
+      const sport = String(row.pick.sport || "OTHER").toUpperCase();
+      counts[sport] = (counts[sport] ?? 0) + 1;
+    }
+    return counts;
+  }, [enriched]);
+
+  const visibleSportFilters = useMemo(
+    () =>
+      AVAILABLE_SPORTS.filter((sport) => (pickCountsBySport[sport] ?? 0) > 0),
+    [pickCountsBySport],
+  );
 
   const groupedPicks = useMemo(() => {
     const sportMap = new Map<
@@ -873,33 +927,48 @@ export default function PicksPage() {
                         {loading ? "Loading..." : `${filtered.length} pick(s)`}
                       </div>
 
-                      {!loading &&
-                        groupedPicks.map(({ sport, groups }) => {
-                          const meta = SPORT_META[sport as SportKey] ?? null;
-                          const picksCount = groups.reduce(
-                            (acc, group) => acc + group.rows.length,
-                            0,
-                          );
+                      {!loading && (
+                        <>
+                          {visibleSportFilters.map((sport) => {
+                            const meta = SPORT_META[sport] ?? null;
+                            const picksCount = pickCountsBySport[sport] ?? 0;
+                            const active = picksSportFilter === sport;
 
-                          return (
-                            <div
-                              key={sport}
-                              className={`rounded-2xl border px-4 py-2 text-sm text-white/80 ${
-                                meta?.soft ?? "border-white/10 bg-black/20"
+                            return (
+                              <button
+                                key={sport}
+                                type="button"
+                                onClick={() => setPicksSportFilter(sport)}
+                                className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-sm transition ${
+                                  active
+                                    ? meta?.soft ?? "border-white/20 bg-white/10 text-white"
+                                    : "border-white/10 bg-black/20 text-white/80 hover:bg-white/5"
+                                }`}
+                              >
+                                <LeagueBadge sport={sport} size={18} />
+                                <span className="font-medium">
+                                  {meta?.label ?? sport}
+                                </span>
+                                <span className="text-white/50">{picksCount}</span>
+                              </button>
+                            );
+                          })}
+
+                          {visibleSportFilters.length > 1 ? (
+                            <button
+                              type="button"
+                              onClick={() => setPicksSportFilter("ALL")}
+                              className={`rounded-2xl border px-4 py-2 text-sm transition ${
+                                picksSportFilter === "ALL"
+                                  ? "border-white/20 bg-white/10 text-white"
+                                  : "border-white/10 bg-black/20 text-white/80 hover:bg-white/5"
                               }`}
                             >
-                              <span className="mr-2">
-                                {meta?.emoji ?? "🎯"}
-                              </span>
-                              <span className="font-medium">
-                                {meta?.label ?? sport}
-                              </span>
-                              <span className="ml-2 text-white/50">
-                                {picksCount}
-                              </span>
-                            </div>
-                          );
-                        })}
+                              All
+                            </button>
+                          ) : null}
+                        </>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -940,7 +1009,7 @@ export default function PicksPage() {
                               meta?.soft ?? "border-white/10 bg-black/20"
                             }`}
                           >
-                            <span className="mr-2">{meta?.emoji ?? "🎯"}</span>
+                            <div className="mr-2 inline-flex items-center"><LeagueBadge sport={sport} size={18} /></div>
                             <span className="text-sm font-semibold text-white">
                               {meta?.label ?? sport}
                             </span>
@@ -1035,11 +1104,12 @@ export default function PicksPage() {
                                         : status || "scheduled"}
                                     </span>
                                     <span
-                                      className={`rounded-full border px-3 py-1 text-xs ${
+                                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${
                                         meta?.soft ??
                                         "border-white/10 bg-black/20 text-white/80"
                                       } ${meta?.accent ?? "text-white/80"}`}
                                     >
+                                      <LeagueBadge sport={sport} size={14} />
                                       {meta?.label ?? sport}
                                     </span>
                                     {group.rows.some((r) => r.locked) ? (

@@ -136,7 +136,7 @@ function pickCell(active: boolean, disabled: boolean) {
     return "rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-left opacity-50 cursor-not-allowed";
   }
   return [
-    "rounded-2xl border px-3 py-3 text-left transition",
+    "rounded-2xl border px-4 py-4 md:px-3 md:py-3 text-left transition",
     active
       ? "border-blue-400/70 bg-blue-500/15 text-white shadow-[0_0_0_1px_rgba(59,130,246,.35),0_0_28px_rgba(59,130,246,.22)]"
       : "border-white/10 bg-black/20 text-white/80 hover:bg-white/5",
@@ -714,13 +714,15 @@ export default function NbaTournamentPage() {
         </div>
 
         {/* Botones */}
-        <div className="grid grid-cols-[1fr_180px_180px_160px] gap-3">
+       <div className="grid gap-3 
+  grid-cols-1 
+  md:grid-cols-[1fr_180px_180px_160px]">
           <div />
           {showSpread ? <div className="text-xs font-semibold text-white/60">Handicap</div> : null}
           {showOU ? <div className="text-xs font-semibold text-white/60">Total</div> : null}
           {showMoneyline ? <div className="text-xs font-semibold text-white/60">Moneyline</div> : null}
 
-        <div className="flex items-center gap-3">
+       <div className="flex items-center gap-3 md:gap-3">
   <TeamLogo code={awayAbbr} />
   <div className="min-w-0">
     <div className="truncate text-base font-semibold">{g.awayTeam}</div>
@@ -780,7 +782,7 @@ export default function NbaTournamentPage() {
             <div className="text-base font-semibold">{g.awayTeam}</div>
           </button>
 
-          <div className="flex items-center gap-3">
+         <div className="flex items-center gap-3 md:gap-3">
   <TeamLogo code={homeAbbr} />
   <div className="min-w-0">
     <div className="truncate text-base font-semibold">{g.homeTeam}</div>
@@ -857,7 +859,7 @@ export default function NbaTournamentPage() {
           <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-3xl font-bold tracking-tight">NBA Tournament</h1>
+               <h1 className="text-xl md:text-3xl font-bold tracking-tight">NBA Tournament</h1>
                 <span className={badgeBase()}>Week {weekId}</span>
                 <span className={badgeBase()}>{weekLabel}</span>
                 <span className={badgeBase()}>
@@ -958,7 +960,7 @@ export default function NbaTournamentPage() {
                     <div className="mb-2">
                       <div className="mb-3 flex items-center justify-between">
                         <div className="text-sm font-semibold text-white/90">Upcoming</div>
-                        <div className="flex items-center gap-3">
+                       <div className="flex items-center gap-3 md:gap-3">
                           <div className="text-xs text-white/50">{sectioned.upcoming.length} game(s)</div>
                           <button
                             type="button"
@@ -978,7 +980,7 @@ export default function NbaTournamentPage() {
                     <div className="mb-2">
                       <div className="mb-3 flex items-center justify-between">
                         <div className="text-sm font-semibold text-white/70">Past (this week)</div>
-                        <div className="flex items-center gap-3">
+                       <div className="flex items-center gap-3 md:gap-3">
                           <div className="text-xs text-white/50">{sectioned.past.length} game(s)</div>
                           <button
                             type="button"
