@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Protected from "@/components/protected";
 import { useAuth } from "@/lib/auth-context";
@@ -279,6 +279,20 @@ type OptimisticPick = Partial<DailyPickDoc> & {
 };
 
 export default function DailyTournamentPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white" />
+        </div>
+      }
+    >
+      <DailyTournamentContent />
+    </Suspense>
+  );
+}
+
+function DailyTournamentContent() {
   const { user } = useAuth();
 
   const dayId = useMemo(() => getDayId(), []);

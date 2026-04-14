@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: "Stat2Win",
   webDir: "out",
   server: {
-    url: "https://tudominio.com",
+    url: "https://stat2win.vercel.app",
     cleartext: true,
   },
 };
