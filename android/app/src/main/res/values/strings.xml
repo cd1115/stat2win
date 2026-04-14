@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Stat2Win</string>
+    <string name="title_activity_main">Stat2Win</string>
+    <string name="package_name">com.stat2win.app</string>
+    <string name="custom_url_scheme">com.stat2win.app</string>
+</resources>
