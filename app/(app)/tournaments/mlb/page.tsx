@@ -1,5 +1,6 @@
 "use client";
 
+import { listenMyPicksByWeekAndSport } from "@/lib/firestore-picks";
 import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Protected from "@/components/protected";
@@ -42,7 +43,9 @@ function scoreText(g: GameDoc) {
   return `${String(g.awayTeam ?? "").trim()} ${away} • ${String(g.homeTeam ?? "").trim()} ${home}`;
 }
 
-function effectiveStatus(g: GameDoc): "scheduled" | "inprogress" | "final" | "locked" {
+function effectiveStatus(
+  g: GameDoc,
+): "scheduled" | "inprogress" | "final" | "locked" {
   const raw = String(g?.status ?? "").toLowerCase();
   if (raw === "final") return "final";
   if (raw === "inprogress") return "inprogress";
@@ -71,7 +74,8 @@ function isSamePrDay(ts: any, now = new Date()) {
         ? ts
         : typeof ts === "number"
           ? new Date(ts)
-          : null as any;
+          : (null as any);
+
   if (!d) return false;
 
   const prDate = new Date(
@@ -87,7 +91,6 @@ function isSamePrDay(ts: any, now = new Date()) {
     prDate.getDate() === prNowDate.getDate()
   );
 }
-
 
 function isEpochMs13(v: unknown) {
   return typeof v === "string" && /^\d{13}$/.test(v);
@@ -122,7 +125,11 @@ function dedupeGames(rows: GameDoc[]) {
     let score = 0;
     if (g?.mlbGamePk) score += 5;
     if (g?.markets?.moneyline) score += 2;
-    if (g?.markets?.spread?.homeLine != null || g?.markets?.spread?.awayLine != null) score += 3;
+    if (
+      g?.markets?.spread?.homeLine != null ||
+      g?.markets?.spread?.awayLine != null
+    )
+      score += 3;
     if (g?.markets?.total?.line != null) score += 3;
     if (g?.scoreHome != null || g?.scoreAway != null) score += 2;
     if (g?.status === "final" || g?.status === "inprogress") score += 1;
@@ -142,7 +149,6 @@ function dedupeGames(rows: GameDoc[]) {
 
   return Array.from(map.values());
 }
-
 
 function getSpread(g: any) {
   const sp = g?.markets?.spread ?? g?.markets?.sp ?? null;
@@ -317,9 +323,7 @@ function teamAbbrFrom(g: any, side: "home" | "away") {
 
 function TeamLogo({ code, size = 40 }: { code: string; size?: number }) {
   const [imgError, setImgError] = useState(false);
-  const safeCode = String(code || "")
-    .trim()
-    .toUpperCase();
+  const safeCode = String(code || "").trim().toUpperCase();
   const src = `/teams/mlb/${safeCode}.png`;
 
   return (
@@ -378,12 +382,13 @@ export default function MlbTournamentPage() {
   const [statusFilter, setStatusFilter] = useState<StatusTab>("all");
   const [market, setMarket] = useState<MarketTab>("all");
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [showUpcoming, setShowUpcoming] = useState(false);
+  const [showPast, setShowPast] = useState(false);
   const [optimisticPicks, setOptimisticPicks] = useState<
     Record<string, OptimisticPick>
   >({});
 
   const placePickFn = useMemo(() => httpsCallable(functions, "placePick"), []);
-  const getMyPicksWeekFn = useMemo(() => httpsCallable(functions, "getMyPicksWeek"), []);
 
   function pushNotice(message: string) {
     setNotice(message);
@@ -412,7 +417,6 @@ export default function MlbTournamentPage() {
   }, [sport, weekId]);
 
   useEffect(() => {
-    let cancelled = false;
     setErr(null);
 
     if (!user?.uid || !weekId) {
@@ -420,22 +424,15 @@ export default function MlbTournamentPage() {
       return;
     }
 
-    (async () => {
-      try {
-        const res: any = await getMyPicksWeekFn({ weekId });
-        if (cancelled) return;
-        setMyPicks(Array.isArray(res?.data?.picks) ? res.data.picks : []);
-      } catch (e: any) {
-        if (cancelled) return;
-        setErr(formatCallableError(e));
-        setMyPicks([]);
-      }
-    })();
+    const unsub = listenMyPicksByWeekAndSport(
+      user.uid,
+      weekId,
+      sport,
+      (rows: PickDoc[]) => setMyPicks(rows),
+    );
 
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.uid, weekId, getMyPicksWeekFn]);
+    return () => unsub?.();
+  }, [user?.uid, weekId, sport]);
 
   const pickMap = useMemo(() => {
     const m = new Map<string, PickDoc>();
@@ -459,13 +456,6 @@ export default function MlbTournamentPage() {
   const filteredGames = useMemo(() => {
     let rows = [...games];
 
-    const currentWeekId = getWeekId(new Date());
-    const isViewingCurrentWeek = weekId === currentWeekId;
-
-    if (isViewingCurrentWeek) {
-      rows = rows.filter((g) => isSamePrDay(g.startTime, new Date()));
-    }
-
     rows.sort((a, b) => {
       const at = a.startTime?.toMillis?.() ?? 0;
       const bt = b.startTime?.toMillis?.() ?? 0;
@@ -476,12 +466,8 @@ export default function MlbTournamentPage() {
     if (qq) {
       rows = rows.filter(
         (g) =>
-          String(g.homeTeam ?? "")
-            .toLowerCase()
-            .includes(qq) ||
-          String(g.awayTeam ?? "")
-            .toLowerCase()
-            .includes(qq),
+          String(g.homeTeam ?? "").toLowerCase().includes(qq) ||
+          String(g.awayTeam ?? "").toLowerCase().includes(qq),
       );
     }
 
@@ -503,28 +489,85 @@ export default function MlbTournamentPage() {
     }
 
     return rows;
-  }, [games, q, statusFilter, market]);
+  }, [games, q, statusFilter, market, weekId]);
 
-  const groupedGames = useMemo(() => {
-    const live = filteredGames.filter((g) => effectiveStatus(g) === "inprogress");
-    const final = filteredGames.filter((g) => effectiveStatus(g) === "final");
-    const scheduled = filteredGames.filter((g) => {
-      const s = effectiveStatus(g);
-      return s !== "inprogress" && s !== "final";
-    });
+  const sectioned = useMemo(() => {
+    const now = new Date();
 
-    const sections: Array<{
-      title: string;
-      rows: GameDoc[];
-      liveDot?: boolean;
-    }> = [];
-    if (live.length)
-      sections.push({ title: "LIVE", rows: live, liveDot: true });
-    if (scheduled.length) sections.push({ title: "Today", rows: scheduled });
-    if (final.length) sections.push({ title: "Final Today", rows: final });
+    const startMs = (g: GameDoc) =>
+      g.startTime?.toMillis?.() ??
+      g.startTime?.toDate?.()?.getTime?.() ??
+      0;
 
-    return sections;
-  }, [filteredGames]);
+    // Returns numeric YYYYMMDD in Puerto Rico timezone for safe comparison
+    const prDayNum = (d: Date): number => {
+      const s = d.toLocaleString("en-US", { timeZone: "America/Puerto_Rico" });
+      const p = new Date(s);
+      return p.getFullYear() * 10000 + (p.getMonth() + 1) * 100 + p.getDate();
+    };
+
+    const todayNum = prDayNum(now);
+
+    const gameDayNum = (g: GameDoc): number | null => {
+      const ms = startMs(g);
+      return ms ? prDayNum(new Date(ms)) : null;
+    };
+
+    if (statusFilter !== "all") {
+      const rows = [...filteredGames].sort((a, b) => startMs(a) - startMs(b));
+      return { mode: "flat" as const, total: rows.length, rows };
+    }
+
+    const rows = [...filteredGames];
+
+    // Only Firestore-confirmed inprogress go to LIVE
+    const live = rows
+      .filter((g) => String(g?.status ?? "").toLowerCase() === "inprogress")
+      .sort((a, b) => startMs(a) - startMs(b));
+
+    const liveSet = new Set(live.map((g) => g.id));
+
+    const today = rows
+      .filter((g) => {
+        if (liveSet.has(g.id)) return false;
+        const s = String(g?.status ?? "").toLowerCase();
+        if (s === "final" || s === "inprogress") return false;
+        return gameDayNum(g) === todayNum;
+      })
+      .sort((a, b) => startMs(a) - startMs(b));
+
+    const upcoming = rows
+      .filter((g) => {
+        if (liveSet.has(g.id)) return false;
+        const s = String(g?.status ?? "").toLowerCase();
+        if (s === "final" || s === "inprogress") return false;
+        const d = gameDayNum(g);
+        return d !== null && d > todayNum;
+      })
+      .sort((a, b) => startMs(a) - startMs(b));
+
+    const past = rows
+      .filter((g) => {
+        if (liveSet.has(g.id)) return false;
+        const s = String(g?.status ?? "").toLowerCase();
+        if (s === "final") return true;
+        if (s === "inprogress") return false;
+        const d = gameDayNum(g);
+        return d !== null && d < todayNum;
+      })
+      .sort((a, b) => startMs(b) - startMs(a));
+
+    const total = live.length + today.length + upcoming.length + past.length;
+
+    return {
+      mode: "sections" as const,
+      total,
+      live,
+      today,
+      upcoming,
+      past,
+    };
+  }, [filteredGames, statusFilter]);
 
   async function savePick(args: {
     g: GameDoc;
@@ -538,21 +581,24 @@ export default function MlbTournamentPage() {
     const gameKey = String(
       (args.g as any).gameId ?? stableGameKey(args.g) ?? "",
     ).trim();
-    const gameKeySafe = gameKey || String((args.g as any).id ?? "").trim();
+    const gameKeySafe = gameKey || String(args.g.id);
 
     if (!gameKeySafe) {
-      pushNotice("Este juego no tiene un gameId válido todavía.");
+      pushNotice(
+        "Este juego tiene un gameId inválido (timestamp). No se puede pickear.",
+      );
       return;
     }
 
     if (isClosed(args.g)) return;
 
     const key = `${gameKeySafe}:${args.market}`;
+
     const existing =
       (optimisticPicks[key] as any) ||
       pickMap.get(`${gameKeySafe}:${args.market}`) ||
       pickMap.get(`${gameKey}:${args.market}`) ||
-      pickMap.get(`${String((args.g as any).id ?? "").trim()}:${args.market}`);
+      pickMap.get(`${String(args.g.id)}:${args.market}`);
 
     const selectionForMarket = (() => {
       if (args.market === "moneyline") {
@@ -570,6 +616,7 @@ export default function MlbTournamentPage() {
         : args.market === "spread"
           ? "sp"
           : "ou";
+
     const teamAbbr =
       args.market === "moneyline"
         ? args.pick === "home"
@@ -597,7 +644,7 @@ export default function MlbTournamentPage() {
           weekId,
           gameId: (args.g as any).gameId ?? gameKey,
           externalGameId: gameKey,
-          gameDocId: (args.g as any).id,
+          gameDocId: args.g.id,
           market: args.market,
           marketKey,
           pick: canonicalSelection,
@@ -634,10 +681,10 @@ export default function MlbTournamentPage() {
         optimisticPicks[`${gameKeySafe}:spread`] ||
         pickMap.get(`${gameKeySafe}:spread`) ||
         pickMap.get(`${gameKey}:spread`) ||
-        pickMap.get(`${String((args.g as any).id ?? "").trim()}:spread`);
+        pickMap.get(`${String(args.g.id)}:spread`);
       if ((existingSpread as any)?.pick) {
         pushNotice(
-          "No puedes combinar Moneyline y Spread en el mismo juego. Quita el pick de Spread y luego selecciona Moneyline.",
+          "No puedes combinar Moneyline y Spread en el mismo juego. Quita el pick de Spread (My Picks) y luego selecciona Moneyline.",
         );
         return;
       }
@@ -648,10 +695,10 @@ export default function MlbTournamentPage() {
         optimisticPicks[`${gameKeySafe}:moneyline`] ||
         pickMap.get(`${gameKeySafe}:moneyline`) ||
         pickMap.get(`${gameKey}:moneyline`) ||
-        pickMap.get(`${String((args.g as any).id ?? "").trim()}:moneyline`);
+        pickMap.get(`${String(args.g.id)}:moneyline`);
       if ((existingML as any)?.pick) {
         pushNotice(
-          "No puedes combinar Spread y Moneyline en el mismo juego. Quita el pick de Moneyline y luego selecciona Spread.",
+          "No puedes combinar Spread y Moneyline en el mismo juego. Quita el pick de Moneyline (My Picks) y luego selecciona Spread.",
         );
         return;
       }
@@ -680,7 +727,7 @@ export default function MlbTournamentPage() {
         weekId,
         gameId: (args.g as any).gameId ?? gameKey,
         externalGameId: gameKey,
-        gameDocId: (args.g as any).id,
+        gameDocId: args.g.id,
         market: args.market,
         marketKey,
         pick: canonicalSelection,
@@ -779,10 +826,16 @@ export default function MlbTournamentPage() {
                   Locked
                 </span>
               ) : (
-                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200">
+                <span className="rounded-full border border-green-500/30 bg-green-500/10 px-2 py-0.5 text-xs text-green-400">
                   Open
                 </span>
               )}
+
+              {!gameKey ? (
+                <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-200">
+                  Bad gameId
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -1025,8 +1078,8 @@ export default function MlbTournamentPage() {
               </div>
 
               <p className="mt-2 text-white/60">
-                Picks lock automatically at tip-off. Points update when games go{" "}
-                <span className="text-white/80">FINAL</span>.
+                Picks lock automatically at first pitch. Points update when
+                games go <span className="text-white/80">FINAL</span>.
               </p>
             </div>
 
@@ -1059,29 +1112,6 @@ export default function MlbTournamentPage() {
             </div>
           </div>
 
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => setWeekOffset((v) => v - 1)}
-              className="rounded-xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white/80 hover:bg-white/5"
-            >
-              ← Prev Week
-            </button>
-
-            <button
-              onClick={() => setWeekOffset(0)}
-              className="rounded-xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white/80 hover:bg-white/5"
-            >
-              Current Week
-            </button>
-
-            <button
-              onClick={() => setWeekOffset((v) => v + 1)}
-              className="rounded-xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white/80 hover:bg-white/5"
-            >
-              Next Week →
-            </button>
-          </div>
-
           {err ? (
             <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
               {err}
@@ -1094,45 +1124,87 @@ export default function MlbTournamentPage() {
             </div>
           ) : null}
 
-          <div className="mb-4 flex flex-wrap gap-2">
-            {(["all", "moneyline", "spread", "ou"] as MarketTab[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMarket(m)}
-                className={marketChip(market === m)}
-              >
-                {marketLabel(m)}
-              </button>
-            ))}
-          </div>
-
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="text-sm text-white/70">
-              {filteredGames.length} game(s)
-            </div>
+            <div className="text-sm text-white/70">{sectioned.total} game(s)</div>
 
-            <div className="mt-4 space-y-5">
-              {groupedGames.map((section) => (
-                <div key={section.title}>
-                  <div className="mb-3 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      {section.liveDot ? (
-                        <span className="inline-flex h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-                      ) : null}
-                      <div className="text-sm font-semibold text-white/90">
-                        {section.title}
+            <div className="mt-4">
+              {sectioned.mode === "flat" ? (
+                sectioned.rows.map((g, idx) => renderGame(g, idx))
+              ) : (
+                <>
+                  {sectioned.live.length > 0 && (
+                    <div className="mb-2">
+                      <div className="mb-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                          <div className="text-sm font-semibold text-white/90">
+                            LIVE
+                          </div>
+                        </div>
+                        <div className="text-xs text-white/50">
+                          {sectioned.live.length} game(s)
+                        </div>
+                      </div>
+                      <div className="space-y-3">
+                        {sectioned.live.map((g, idx) => renderGame(g, idx))}
                       </div>
                     </div>
-                    <div className="text-xs text-white/50">
-                      {section.rows.length} game(s)
+                  )}
+
+                  <div className="mb-2">
+                    <div className="mb-3 flex items-center justify-between">
+                      <div className="text-sm font-semibold text-white/90">
+                        Today
+                      </div>
+                      <div className="text-xs text-white/50">
+                        {sectioned.today.length} game(s)
+                      </div>
                     </div>
+
+                    {sectioned.today.length === 0 ? (
+                      <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
+                        No games today.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {sectioned.today.map((g, idx) => renderGame(g, idx))}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="space-y-3">
-                    {section.rows.map((g, idx) => renderGame(g, idx))}
-                  </div>
-                </div>
-              ))}
+                  {sectioned.upcoming.length > 0 && (
+                    <div className="mb-2">
+                      <div className="mb-3 flex items-center justify-between">
+                        <div className="text-sm font-semibold text-white/90">
+                          Upcoming
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="text-xs text-white/50">
+                            {sectioned.upcoming.length} game(s)
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowUpcoming((v) => !v)}
+                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/80 hover:bg-white/10"
+                          >
+                            {showUpcoming ? "Hide" : "Show"}
+                          </button>
+                        </div>
+                      </div>
+
+                      {showUpcoming && (
+                        <div className="space-y-3">
+                          {sectioned.upcoming.map((g, idx) =>
+                            renderGame(g, idx),
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+
+                </>
+              )}
             </div>
           </div>
 

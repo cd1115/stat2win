@@ -31,7 +31,7 @@ export default function Sidebar({
 
     { href: "/store", label: "Store" },
     { href: "/redeems", label: "My Redeems" },
-
+     { href: "/subscription", label: "Subscription" },
     { href: "/settings", label: "Settings" },
   ];
 

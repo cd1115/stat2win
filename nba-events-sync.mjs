@@ -7,28 +7,31 @@ const serviceAccount = JSON.parse(
 );
 
 if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
+  admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 }
 const db = admin.firestore();
 
-function weekIdFromDate(d) {
-  const date = new Date(d);
-  const target = new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
-  );
-  const dayNr = (target.getUTCDay() + 6) % 7;
-  target.setUTCDate(target.getUTCDate() - dayNr + 3);
-  const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
-  const diff = target - firstThursday;
-  const week = 1 + Math.round(diff / (7 * 24 * 60 * 60 * 1000));
-  const year = target.getUTCFullYear();
-  return `${year}-W${String(week).padStart(2, "0")}`;
+// ── CRITICAL: Must match getWeekId() in Cloud Functions (Sunday-based) ──────
+function getWeekId(date = new Date()) {
+  const startOfDay = (d) => {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x;
+  };
+  const weekStartSunday = (d) => {
+    const x = startOfDay(d);
+    x.setDate(x.getDate() - x.getDay()); // Sunday = 0
+    return x;
+  };
+  const start = weekStartSunday(date);
+  const year = start.getFullYear();
+  const jan1 = startOfDay(new Date(year, 0, 1));
+  const firstSunday = weekStartSunday(jan1);
+  const diffDays = Math.floor((start - firstSunday) / 86400000);
+  const weekNo = Math.floor(diffDays / 7) + 1;
+  return `${year}-W${String(weekNo).padStart(2, "0")}`;
 }
 
-// The Odds API devuelve nombres completos.
-// Nosotros guardaremos ABBR estándar NBA para tu schema.
 const NBA_TEAM_MAP = {
   "Atlanta Hawks": "ATL",
   "Boston Celtics": "BOS",
@@ -67,13 +70,35 @@ function abbr(name) {
   return NBA_TEAM_MAP[name] ?? null;
 }
 
-async function fetchEventsNBA(apiKey) {
-  const url = `https://api.the-odds-api.com/v4/sports/basketball_nba/events`;
-  const res = await axios.get(url, {
-    params: { apiKey, dateFormat: "iso" },
-    timeout: 20000,
-  });
-  return res.data; // [{id, sport_key, commence_time, home_team, away_team}, ...]
+async function findExisting(oddsEventId, matchKey) {
+  // 1) by oddsEventId
+  let q = await db
+    .collection("games")
+    .where("sport", "==", "NBA")
+    .where("oddsEventId", "==", oddsEventId)
+    .limit(1)
+    .get();
+  if (!q.empty) return q.docs[0];
+
+  // 2) by gameId (oddsEventId is used as gameId in Cloud Functions)
+  q = await db
+    .collection("games")
+    .where("sport", "==", "NBA")
+    .where("gameId", "==", oddsEventId)
+    .limit(1)
+    .get();
+  if (!q.empty) return q.docs[0];
+
+  // 3) by matchKey
+  q = await db
+    .collection("games")
+    .where("sport", "==", "NBA")
+    .where("matchKey", "==", matchKey)
+    .limit(1)
+    .get();
+  if (!q.empty) return q.docs[0];
+
+  return null;
 }
 
 async function run() {
@@ -83,62 +108,102 @@ async function run() {
     process.exit(1);
   }
 
-  const events = await fetchEventsNBA(apiKey);
-  let upserted = 0;
-  let skipped = 0;
+  const { data } = await axios.get(
+    "https://api.the-odds-api.com/v4/sports/basketball_nba/events",
+    { params: { apiKey, dateFormat: "iso" }, timeout: 20000 },
+  );
 
-  for (const ev of events) {
+  console.log(`[nba-events] received ${data.length} event(s)`);
+  let upserted = 0,
+    skipped = 0,
+    migrated = 0;
+
+  for (const ev of data) {
     const home = abbr(ev.home_team);
     const away = abbr(ev.away_team);
-
     if (!home || !away) {
-      console.log("TEAM MAP missing:", ev.home_team, "vs", ev.away_team);
+      console.log("TEAM MAP missing:", ev.home_team, ev.away_team);
       skipped++;
       continue;
     }
 
-    const weekId = weekIdFromDate(ev.commence_time);
-    const yyyymmdd = ev.commence_time.slice(0, 10).replaceAll("-", "");
-    const gameId = `${yyyymmdd}_${ev.id}`.slice(0, 25);
-    const dateKey = ev.commence_time.slice(0, 10).replaceAll("-", ""); // YYYYMMDD
+    const commence = new Date(ev.commence_time);
+    if (isNaN(commence.getTime())) {
+      skipped++;
+      continue;
+    }
+
+    const oddsEventId = String(ev.id ?? "").trim();
+    if (!oddsEventId) {
+      skipped++;
+      continue;
+    }
+
+    const weekId = getWeekId(commence);
+    const dateKey = ev.commence_time.slice(0, 10).replace(/-/g, "");
     const matchKey = `NBA_${dateKey}_${home}_${away}`;
 
+    // ── CRITICAL FIX: gameId = oddsEventId (pure), matching Cloud Functions ──
+    // OLD code used `${yyyymmdd}_${ev.id}`.slice(0, 25) — WRONG, caused mismatches
+    const gameId = oddsEventId;
     const docId = `NBA_${weekId}_${gameId}`;
 
-    await db
-      .collection("games")
-      .doc(docId)
-      .set(
-        {
-          league: "NBA",
-          sport: "NBA",
-          weekId,
-          gameId,
-          matchKey, // 👈 AÑADE ESTO
-          homeTeam: home,
-          awayTeam: away,
-          startTime: admin.firestore.Timestamp.fromDate(
-            new Date(ev.commence_time),
-          ),
-          status: "scheduled",
-          scoreHome: null,
-          scoreAway: null,
-          source: "oddsapi",
-          oddsEventId: ev.id,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
+    const existing = await findExisting(oddsEventId, matchKey);
+    const targetRef = existing?.ref ?? db.collection("games").doc(docId);
+
+    if (existing && existing.id !== docId) {
+      migrated++;
+      console.log(`  [migrate] ${existing.id} → ${docId}`);
+    }
+
+    const existingData = existing?.exists ? existing.data() : null;
+    const existingStatus = String(existingData?.status ?? "").toLowerCase();
+
+    await targetRef.set(
+      {
+        league: "NBA",
+        sport: "NBA",
+        weekId,
+        gameId,
+        matchKey,
+        oddsEventId,
+        homeTeam: home,
+        awayTeam: away,
+        startTime: admin.firestore.Timestamp.fromDate(commence),
+        // Preserve status/scores if already set by scores sync
+        status:
+          existingStatus === "inprogress" || existingStatus === "final"
+            ? existingStatus
+            : "scheduled",
+        scoreHome:
+          typeof existingData?.scoreHome === "number"
+            ? existingData.scoreHome
+            : null,
+        scoreAway:
+          typeof existingData?.scoreAway === "number"
+            ? existingData.scoreAway
+            : null,
+        source: "oddsapi",
+        createdAt:
+          existingData?.createdAt ??
+          admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
 
     upserted++;
   }
 
-  console.log("NBA events -> upserted:", upserted, "skipped:", skipped);
-  console.log("DONE");
+  console.log(
+    `[nba-events] done | upserted=${upserted} skipped=${skipped} migrated=${migrated}`,
+  );
 }
 
 run().catch((e) => {
-  console.error("NBA events sync error:", e?.response?.status, e?.message || e);
+  console.error(
+    "nba-events-sync failed:",
+    e?.response?.data || e?.message || e,
+  );
   process.exit(1);
 });

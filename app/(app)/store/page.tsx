@@ -51,41 +51,88 @@ function ShippingRequiredModal({
   onClose: () => void;
 }) {
   if (!open) return null;
-
   return (
     <div className="fixed inset-0 z-50 grid place-items-center">
       <button
         aria-label="Close"
         onClick={onClose}
-        className="absolute inset-0 bg-black/60"
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
       />
-      <div className="relative w-[92%] max-w-md rounded-3xl border border-white/10 bg-[#0b1020]/95 p-6 backdrop-blur-xl">
-        <div className="text-xl font-semibold text-white">
+      <div className="relative w-[92%] max-w-md rounded-3xl border border-white/10 bg-[#0d1117] p-6">
+        <div className="text-lg font-bold text-white">
           Shipping address required
         </div>
-        <p className="mt-2 text-sm text-white/70">
-          To redeem physical rewards, please add your shipping address first.
+        <p className="mt-2 text-sm text-white/60">
+          To redeem physical rewards, please add your shipping address in
+          Settings first.
         </p>
-
-        <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-xs text-white/60">
-          Go to <span className="text-white/80">Settings</span>, save your
-          address, then come back to redeem.
-        </div>
-
-        <div className="mt-6 flex gap-2">
+        <div className="mt-5 flex gap-2">
           <Link
             href="/settings"
-            className="flex-1 rounded-xl bg-blue-600 py-2 text-center text-sm font-semibold text-white hover:bg-blue-500"
+            className="flex-1 rounded-xl bg-blue-600 py-2.5 text-center text-sm font-bold text-white hover:bg-blue-500 transition"
           >
             Go to Settings
           </Link>
           <button
             onClick={onClose}
-            className="flex-1 rounded-xl border border-white/10 bg-white/5 py-2 text-sm text-white hover:bg-white/10"
+            className="flex-1 rounded-xl border border-white/10 bg-white/5 py-2.5 text-sm text-white/70 hover:bg-white/10 transition"
           >
             Cancel
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Points progress bar ──────────────────────────────────────────────────────
+function PointsBar({
+  points,
+  products,
+}: {
+  points: number;
+  products: StoreProduct[];
+}) {
+  const rewardProducts = products.filter((p) => p.pointsCost);
+  const sorted = [...rewardProducts].sort(
+    (a, b) => (a.pointsCost ?? 0) - (b.pointsCost ?? 0),
+  );
+  const maxCost = sorted[sorted.length - 1]?.pointsCost ?? 10000;
+  const nextUnlock = sorted.find((p) => (p.pointsCost ?? 0) > points);
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#0d1117] px-5 py-4">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="text-xs text-white/40 uppercase tracking-wider">
+            Your Balance
+          </div>
+          <div className="mt-0.5 text-2xl font-black text-white">
+            {points.toLocaleString()}{" "}
+            <span className="text-sm font-normal text-amber-400">RP</span>
+          </div>
+        </div>
+        {nextUnlock && (
+          <div className="text-right">
+            <div className="text-xs text-white/40">Next reward</div>
+            <div className="text-sm font-semibold text-white/70">
+              {nextUnlock.title}
+            </div>
+            <div className="text-xs text-amber-400">
+              {((nextUnlock.pointsCost ?? 0) - points).toLocaleString()} RP away
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 transition-all"
+          style={{ width: `${Math.min(100, (points / maxCost) * 100)}%` }}
+        />
+      </div>
+      <div className="flex justify-between mt-1.5 text-[10px] text-white/30">
+        <span>0</span>
+        <span>{maxCost.toLocaleString()} RP</span>
       </div>
     </div>
   );
@@ -99,25 +146,23 @@ export default function StoreAppPage() {
   const [redeem, setRedeem] = useState<RedeemState>({ status: "idle" });
   const [showShippingModal, setShowShippingModal] = useState(false);
 
-  // ✅ Keep products stable
+  const isPremium = plan === "premium";
+
   const products = useMemo(() => {
     if (cat === "trending") return STORE_PRODUCTS;
     return STORE_PRODUCTS.filter((p) => p.category === cat);
   }, [cat]);
 
-  // ✅ Create callable once (avoid re-creating each redeem)
-  const redeemFn = useMemo(() => {
-    return httpsCallable(getFunctions(getApp()), "redeemProduct");
-  }, []);
+  const redeemFn = useMemo(
+    () => httpsCallable(getFunctions(getApp()), "redeemProduct"),
+    [],
+  );
 
-  const onUpgrade = useCallback(() => {
-    router.push("/settings/subscription");
-  }, [router]);
+  const onUpgrade = useCallback(() => router.push("/subscription"), [router]);
 
   const onRedeem = useCallback(
     async (product: StoreProduct) => {
       if (!product.pointsCost) return;
-
       if (!auth.currentUser?.uid) {
         setRedeem({
           status: "error",
@@ -127,8 +172,6 @@ export default function StoreAppPage() {
         setTimeout(() => setRedeem({ status: "idle" }), 2500);
         return;
       }
-
-      // ✅ Optional: quick client guard (no break)
       if (typeof points === "number" && product.pointsCost > points) {
         setRedeem({
           status: "error",
@@ -138,30 +181,26 @@ export default function StoreAppPage() {
         setTimeout(() => setRedeem({ status: "idle" }), 2500);
         return;
       }
-
       if ((product as any).requiresShipping === true) {
-        const uid = auth.currentUser.uid;
-        const snap = await getDoc(doc(db, "users", uid));
+        const snap = await getDoc(doc(db, "users", auth.currentUser.uid));
         const data = snap.exists() ? snap.data() : null;
-
         const requireShipping =
           (data as any)?.preferences?.requireShippingForRewards ?? true;
-
         if (requireShipping && !isValidAddress((data as any)?.address)) {
           setShowShippingModal(true);
           return;
         }
       }
-
       setRedeem({ status: "loading", productId: product.id });
-
       try {
-        await redeemFn({ productId: product.id, pointsCost: product.pointsCost });
-
+        await redeemFn({
+          productId: product.id,
+          pointsCost: product.pointsCost,
+        });
         setRedeem({
           status: "success",
           productId: product.id,
-          message: "Redeemed ✅ (points updated)",
+          message: "Redeemed! ✅",
         });
       } catch (e: any) {
         setRedeem({
@@ -173,7 +212,7 @@ export default function StoreAppPage() {
         setTimeout(() => setRedeem({ status: "idle" }), 2500);
       }
     },
-    [points, redeemFn]
+    [points, redeemFn],
   );
 
   return (
@@ -184,39 +223,60 @@ export default function StoreAppPage() {
       />
 
       <div className="mx-auto max-w-6xl px-6 py-10">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-6">
+        {/* ── Header ─────────────────────────────────────────────────── */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <div className="text-sm text-white/60">Store</div>
-            <h1 className="text-3xl font-semibold tracking-tight">
+            <div className="inline-flex items-center gap-2 text-xs text-white/40 uppercase tracking-wider">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+              Reward Store
+            </div>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-white">
               Shop the Game
             </h1>
-            <p className="mt-2 text-white/70">
-              Redeem with points or buy instantly. Your rewards, in one place.
+            <p className="mt-1 text-sm text-white/50">
+              Redeem with Reward Points or buy instantly. Earn more by making
+              correct picks.
             </p>
-
-            <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
-              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-white/80">
-                Plan: {loading ? "..." : plan.toUpperCase()}
-              </span>
-              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-white/80">
-                Points: {loading ? "..." : points.toLocaleString()}
-              </span>
-            </div>
           </div>
 
-          <div className="shrink-0">
-            <button
-              onClick={onUpgrade}
-              className="rounded-xl bg-blue-600/90 px-4 py-2 text-sm font-semibold transition hover:bg-blue-600"
-            >
-              Upgrade
-            </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {!isPremium && (
+              <button
+               
+                onClick={onUpgrade}
+                className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-sm font-bold text-blue-300 hover:bg-blue-500/20 transition"
+              >
+                ✦ Upgrade Premium
+              </button>
+            )}
+            {isPremium && (
+              <span className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-sm font-bold text-blue-300">
+                ✦ Premium
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Categories */}
-        <div className="mt-8 flex flex-wrap gap-2">
+        {/* ── Points Balance Bar ─────────────────────────────────────── */}
+        {!loading && (
+          <div className="mt-6">
+            <PointsBar points={points} products={STORE_PRODUCTS} />
+          </div>
+        )}
+
+        {/* ── Not logged in banner ───────────────────────────────────── */}
+        {!isAuthed && (
+          <div className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            ⚠️ Please{" "}
+            <Link href="/login" className="underline font-semibold">
+              log in
+            </Link>{" "}
+            to redeem points.
+          </div>
+        )}
+
+        {/* ── Categories ────────────────────────────────────────────── */}
+        <div className="mt-6 flex flex-wrap gap-2">
           {STORE_CATEGORIES.map((c) => {
             const active = c.key === cat;
             return (
@@ -224,10 +284,10 @@ export default function StoreAppPage() {
                 key={c.key}
                 onClick={() => setCat(c.key)}
                 className={cn(
-                  "rounded-full border px-4 py-2 text-sm transition",
+                  "rounded-xl border px-4 py-2 text-sm font-medium transition",
                   active
-                    ? "border-blue-500/40 bg-blue-500/15 text-blue-100"
-                    : "border-white/10 bg-white/5 text-white/75 hover:bg-white/10"
+                    ? "border-white/20 bg-white/10 text-white"
+                    : "border-white/10 bg-black/20 text-white/55 hover:bg-white/5 hover:text-white/80",
                 )}
               >
                 {c.emoji ? `${c.emoji} ` : ""}
@@ -237,8 +297,8 @@ export default function StoreAppPage() {
           })}
         </div>
 
-        {/* Grid */}
-        <div className="mt-8 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        {/* ── Product Grid ──────────────────────────────────────────── */}
+        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {products.map((p) => {
             const isLoading =
               redeem.status === "loading" && redeem.productId === p.id;
@@ -246,113 +306,151 @@ export default function StoreAppPage() {
               redeem.status === "success" && redeem.productId === p.id;
             const isError =
               redeem.status === "error" && redeem.productId === p.id;
-
             const showPoints = typeof p.pointsCost === "number";
             const showPrice = typeof p.priceUSD === "number";
+            const canAfford = showPoints && points >= (p.pointsCost ?? 0);
+            const isPremiumLocked = (p as any).premiumOnly && !isPremium;
 
             return (
               <div
                 key={p.id}
-                className="rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl"
+                className={cn(
+                  "relative flex flex-col overflow-hidden rounded-2xl border bg-[#0d1117] transition",
+                  isPremiumLocked
+                    ? "border-purple-500/20 opacity-80"
+                    : "border-white/10 hover:border-white/20",
+                )}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex gap-2">
-                    {p.premiumOnly && (
-                      <span className="rounded-full border border-purple-500/30 bg-purple-500/15 px-2 py-0.5 text-[11px] text-purple-100">
-                        Premium
-                      </span>
-                    )}
-                    {showPoints ? (
-                      <span className="rounded-full border border-blue-500/30 bg-blue-500/15 px-2 py-0.5 text-[11px] text-blue-100">
-                        Reward
-                      </span>
-                    ) : (
-                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-white/70">
-                        Buy
-                      </span>
-                    )}
-                    {(p as any).requiresShipping === true && (
-                      <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-100">
-                        Shipping
-                      </span>
-                    )}
+                {/* Premium locked overlay */}
+                {isPremiumLocked && (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-2xl bg-black/60 backdrop-blur-sm">
+                    <div className="text-2xl mb-2">🔒</div>
+                    <div className="text-xs font-bold text-purple-300">
+                      Premium Only
+                    </div>
+                    <button
+                      onClick={onUpgrade}
+                      className="mt-3 rounded-xl bg-blue-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-blue-500 transition"
+                    >
+                      Upgrade
+                    </button>
                   </div>
+                )}
+
+                {/* Badges */}
+                <div className="flex items-center gap-1.5 p-3 pb-0">
+                  {(p as any).premiumOnly && (
+                    <span className="rounded-full border border-purple-500/30 bg-purple-500/15 px-2 py-0.5 text-[10px] font-bold text-purple-300">
+                      ✦ Premium
+                    </span>
+                  )}
+                  {showPoints && (
+                    <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-bold text-amber-300">
+                      Reward
+                    </span>
+                  )}
+                  {!showPoints && showPrice && (
+                    <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
+                      Buy
+                    </span>
+                  )}
+                  {(p as any).requiresShipping && (
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-white/40">
+                      Ships
+                    </span>
+                  )}
                 </div>
 
-                {/* ✅ Imagen clickeable */}
+                {/* Image */}
                 <Link
                   href={`/store/${p.id}`}
-                  className="mt-3 block h-40 rounded-2xl border border-white/10 bg-black/30 transition hover:border-white/20 hover:bg-black/25"
-                  aria-label={`View ${p.title}`}
-                />
+                  className="mx-3 mt-2 block h-36 rounded-xl border border-white/10 bg-black/40 transition hover:border-white/20"
+                >
+                  {/* product image goes here */}
+                </Link>
 
-                <div className="mt-4">
-                  {/* ✅ Título clickeable */}
+                {/* Info */}
+                <div className="flex flex-1 flex-col p-3">
                   <Link
                     href={`/store/${p.id}`}
-                    className="font-semibold text-white hover:text-white/90 hover:underline underline-offset-4"
+                    className="text-sm font-bold text-white hover:text-white/80 transition"
                   >
                     {p.title}
                   </Link>
-
                   {p.subtitle && (
-                    <div className="mt-1 text-sm text-white/65">
+                    <div className="mt-0.5 text-xs text-white/40">
                       {p.subtitle}
                     </div>
                   )}
 
-                  <div className="mt-3 flex items-center justify-between text-sm">
+                  {/* Price */}
+                  <div className="mt-3 flex items-center justify-between">
                     {showPoints ? (
-                      <div className="text-blue-200">
-                        {p.pointsCost!.toLocaleString()} pts
+                      <div
+                        className={cn(
+                          "text-base font-black",
+                          canAfford ? "text-amber-400" : "text-white/40",
+                        )}
+                      >
+                        {p.pointsCost!.toLocaleString()}{" "}
+                        <span className="text-xs font-normal">RP</span>
                       </div>
                     ) : showPrice ? (
-                      <div className="text-white/70">
+                      <div className="text-base font-black text-emerald-400">
                         ${p.priceUSD!.toFixed(2)}
                       </div>
                     ) : (
-                      <div className="text-white/60">—</div>
+                      <div className="text-white/40">—</div>
+                    )}
+
+                    {showPoints && !canAfford && (
+                      <div className="text-[10px] text-white/30">
+                        {((p.pointsCost ?? 0) - points).toLocaleString()} more
+                      </div>
                     )}
                   </div>
 
-                  <div className="mt-4 flex gap-2">
+                  {/* Buttons */}
+                  <div className="mt-3 flex gap-2">
                     <Link
                       href={`/store/${p.id}`}
-                      className="flex-1 rounded-2xl border border-white/10 bg-white/5 py-2 text-center text-sm text-white/85 transition hover:bg-white/10"
+                      className="flex-1 rounded-xl border border-white/10 bg-white/5 py-2 text-center text-xs font-medium text-white/70 hover:bg-white/10 transition"
                     >
                       View
                     </Link>
-
                     {showPoints ? (
                       <button
-                        disabled={isLoading}
+                        disabled={isLoading || !canAfford || isPremiumLocked}
                         onClick={() => onRedeem(p)}
                         className={cn(
-                          "flex-1 rounded-2xl py-2 text-sm font-semibold transition",
+                          "flex-1 rounded-xl py-2 text-xs font-bold transition",
                           isLoading
-                            ? "bg-white/10 text-white/60"
-                            : "bg-blue-600/90 text-white hover:bg-blue-600"
+                            ? "bg-white/10 text-white/40"
+                            : canAfford && !isPremiumLocked
+                              ? "bg-amber-500 hover:bg-amber-400 text-black"
+                              : "bg-white/5 text-white/25 cursor-not-allowed",
                         )}
                       >
-                        {isLoading ? "Redeeming..." : "Redeem"}
+                        {isLoading ? "…" : "Redeem"}
                       </button>
                     ) : (
-                      <button className="flex-1 rounded-2xl bg-emerald-600/80 py-2 text-sm font-semibold transition hover:bg-emerald-600">
+                      <button className="flex-1 rounded-xl bg-emerald-600 py-2 text-xs font-bold text-white hover:bg-emerald-500 transition">
                         Buy
                       </button>
                     )}
                   </div>
 
+                  {/* Feedback */}
                   {(isSuccess || isError) && (
                     <div
                       className={cn(
-                        "mt-3 rounded-xl border px-3 py-2 text-xs",
+                        "mt-2 rounded-xl border px-3 py-2 text-xs text-center",
                         isSuccess
-                          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
-                          : "border-red-500/25 bg-red-500/10 text-red-200"
+                          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+                          : "border-red-500/25 bg-red-500/10 text-red-300",
                       )}
                     >
-                      {redeem.message}
+                      {(redeem as any).message}
                     </div>
                   )}
                 </div>
@@ -361,11 +459,32 @@ export default function StoreAppPage() {
           })}
         </div>
 
-        {!isAuthed && (
-          <div className="mt-10 rounded-2xl border border-yellow-500/25 bg-yellow-500/10 p-4 text-sm text-yellow-100">
-            You’re not logged in. Please sign in to redeem points.
+        {/* ── Earn more CTA ──────────────────────────────────────────── */}
+        <div className="mt-8 rounded-2xl border border-white/10 bg-[#0d1117] px-6 py-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-sm font-bold text-white">
+              Want more Reward Points?
+            </div>
+            <div className="mt-0.5 text-xs text-white/45">
+              Make correct picks, claim daily login rewards and win weekly
+              tournaments.
+            </div>
           </div>
-        )}
+          <div className="flex gap-2 shrink-0">
+            <Link
+              href="/tournaments/nba"
+              className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-white/70 hover:bg-white/10 transition"
+            >
+              NBA Picks →
+            </Link>
+            <Link
+              href="/tournaments/mlb"
+              className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-white/70 hover:bg-white/10 transition"
+            >
+              MLB Picks →
+            </Link>
+          </div>
+        </div>
       </div>
     </>
   );

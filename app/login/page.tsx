@@ -11,13 +11,8 @@ import {
 import { auth } from "@/lib/firebase";
 import { ensureUserProfileClient } from "@/lib/ensureUserProfile";
 
-function Pill({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/80 backdrop-blur">
-      {children}
-    </span>
-  );
-}
+const inputCls =
+  "w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-white/20 focus:ring-2 focus:ring-blue-500/30 transition";
 
 function LoginPageInner() {
   const router = useRouter();
@@ -28,18 +23,14 @@ function LoginPageInner() {
 
   useEffect(() => {
     if (!fromLogout) return;
-
-    const t = setTimeout(() => {
-      router.replace("/login");
-    }, 10000);
-
+    const t = setTimeout(() => router.replace("/login"), 10000);
     return () => clearTimeout(t);
   }, [fromLogout, router]);
 
   const [user, setUser] = useState<User | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
+  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -48,22 +39,16 @@ function LoginPageInner() {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       setChecking(false);
-
       if (u) {
         try {
           await ensureUserProfileClient();
-        } catch (e) {
-          console.error("ensureUserProfile failed (onAuthStateChanged):", e);
-        }
-
+        } catch {}
         try {
           await auth.currentUser?.getIdToken(true);
         } catch {}
-
         router.replace(nextParam || "/overview");
       }
     });
-
     return () => unsub();
   }, [router, nextParam]);
 
@@ -71,34 +56,26 @@ function LoginPageInner() {
     e.preventDefault();
     setErr(null);
     setLoading(true);
-
     try {
       await signInWithEmailAndPassword(auth, email.trim(), password);
-
       try {
         await ensureUserProfileClient();
-      } catch (e) {
-        console.error("ensureUserProfile failed (after login):", e);
-      }
-
+      } catch {}
       try {
         await auth.currentUser?.getIdToken(true);
       } catch {}
-
       router.replace(nextParam || "/overview");
     } catch (error: unknown) {
       const code = (error as { code?: string })?.code;
-
-      if (code === "auth/invalid-credential") {
+      if (code === "auth/invalid-credential")
         setErr("Email o contraseña incorrectos.");
-      } else if (code === "auth/too-many-requests") {
+      else if (code === "auth/too-many-requests")
         setErr("Demasiados intentos. Intenta en unos minutos.");
-      } else {
+      else
         setErr(
           (error as { message?: string })?.message ??
-            "No se pudo iniciar sesión."
+            "No se pudo iniciar sesión.",
         );
-      }
     } finally {
       setLoading(false);
     }
@@ -106,8 +83,11 @@ function LoginPageInner() {
 
   if (checking) {
     return (
-      <div className="min-h-screen grid place-items-center bg-[#05070B] from-[#070A12] via-[#090B18] to-[#1B1230]">
-        <div className="text-white/70 text-sm">Loading…</div>
+      <div className="min-h-screen grid place-items-center bg-[#05070B]">
+        <div className="flex items-center gap-2 text-white/40 text-sm">
+          <span className="inline-block w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full animate-spin" />
+          Cargando…
+        </div>
       </div>
     );
   }
@@ -115,103 +95,137 @@ function LoginPageInner() {
   if (user) return null;
 
   return (
-    <div className="min-h-screen relative overflow-hidden">
-      <div className="absolute inset-0 bg-[#05070B] from-[#070A12] via-[#090B18] to-[#1B1230]" />
-      <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 h-[520px] w-[820px] rounded-full bg-blue-500/20 blur-3xl opacity-60" />
-      <div className="pointer-events-none absolute -bottom-56 left-20 h-[520px] w-[520px] rounded-full bg-fuchsia-500/15 blur-3xl opacity-50" />
+    <div className="min-h-screen relative overflow-hidden bg-[#05070B]">
+      {/* Background glows */}
+      <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 h-[520px] w-[820px] rounded-full bg-blue-500/20 blur-3xl opacity-55" />
 
-      <div className="relative mx-auto max-w-6xl px-6 py-16">
-        <div className="flex items-center justify-between">
+      <div className="pointer-events-none absolute top-1/3 right-0 h-[350px] w-[350px] rounded-full bg-blue-600/8 blur-3xl" />
+
+      <div className="relative mx-auto max-w-6xl px-6 py-12">
+        {/* Top bar */}
+        <div className="flex items-center justify-between mb-12">
           <Link
             href="/"
             className="text-xl font-bold tracking-tight text-white"
           >
             Stat<span className="text-blue-400">2</span>Win
           </Link>
-
           <Link
             href="/"
-            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/85 hover:border-white/20 hover:bg-white/10 transition"
+            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/65 hover:border-white/18 hover:bg-white/8 hover:text-white/85 transition"
           >
             Home page
           </Link>
         </div>
 
-        <div className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
-          <div className="space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+          {/* ── Left — marketing ── */}
+          <div className="space-y-7">
             <div className="flex flex-wrap gap-2">
-              <Pill>No gambling</Pill>
-              <Pill>Skill-based</Pill>
-              <Pill>Weekly prizes</Pill>
+              {["No gambling", "Skill-based", "Weekly prizes"].map((t) => (
+                <span
+                  key={t}
+                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/65"
+                >
+                  {t}
+                </span>
+              ))}
             </div>
 
-            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-white">
-              Pick winners. Earn points.{" "}
-              <span className="text-blue-400">Win weekly prizes.</span>
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-white leading-tight">
+              Pick winners. <br className="hidden md:block" />
+              Earn points. <span className="text-blue-400">Win prizes.</span>
             </h1>
 
-            <p className="text-white/65 text-base md:text-lg max-w-xl">
-              Compite en torneos semanales basados en habilidad. Sin odds. Sin
-              apuestas. Solo estrategia.
+            <p className="text-white/50 text-base max-w-md leading-relaxed">
+              Compite en torneos diarios de NBA y MLB. Sin apuestas, sin odds —
+              solo estrategia y conocimiento deportivo.
             </p>
 
-            <div className="grid grid-cols-3 gap-3 max-w-xl">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur">
-                <div className="text-sm font-semibold">Pick locks</div>
-                <div className="mt-1 text-xs text-white/60">
-                  Se bloquea al iniciar.
+            {/* Quick stats */}
+            <div className="flex gap-8">
+              {[
+                { val: "100 pts", label: "por pick correcto" },
+                { val: "Diario", label: "nuevo torneo" },
+                { val: "Gratis", label: "para empezar" },
+              ].map((s) => (
+                <div key={s.label}>
+                  <div className="text-base font-bold text-white">{s.val}</div>
+                  <div className="text-xs text-white/38 mt-0.5">{s.label}</div>
                 </div>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur">
-                <div className="text-sm font-semibold">Points</div>
-                <div className="mt-1 text-xs text-white/60">
-                  Se suman por aciertos.
+              ))}
+            </div>
+
+            {/* Feature cards */}
+            <div className="grid grid-cols-3 gap-3 max-w-md">
+              {[
+                {
+                  icon: "🔒",
+                  title: "Pick locks",
+                  desc: "Se bloquea al inicio del juego.",
+                },
+                {
+                  icon: "📊",
+                  title: "Points",
+                  desc: "100 pts por pick correcto.",
+                },
+                {
+                  icon: "🏆",
+                  title: "Leaderboard",
+                  desc: "Ranking diario y semanal.",
+                },
+              ].map((f) => (
+                <div
+                  key={f.title}
+                  className="rounded-2xl border border-white/8 bg-white/[0.04] p-4"
+                >
+                  <div className="text-lg mb-1.5">{f.icon}</div>
+                  <div className="text-xs font-semibold text-white/85">
+                    {f.title}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-white/42 leading-snug">
+                    {f.desc}
+                  </div>
                 </div>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur">
-                <div className="text-sm font-semibold">Leaderboard</div>
-                <div className="mt-1 text-xs text-white/60">
-                  Ranking semanal.
-                </div>
-              </div>
+              ))}
             </div>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-2xl font-semibold text-white">
-                  Welcome back
-                </div>
-                <div className="mt-1 text-sm text-white/60">
-                  Sign in to Stat2Win.
-                </div>
+          {/* ── Right — login form ── */}
+          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-7 backdrop-blur-xl">
+            {/* Form header */}
+            <div className="mb-6">
+              <div className="text-2xl font-bold text-white">Welcome back</div>
+              <div className="mt-1 text-sm text-white/48">
+                Inicia sesión para ver tus picks y torneos.
               </div>
-              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-white/70">
-                Stat2Win
-              </span>
             </div>
 
+            {/* Logout notice */}
             {fromLogout && (
-              <div className="mt-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-                <span className="font-semibold">Done.</span> You’ve been logged
-                out. You can sign in again, or go back to the home page.
+              <div className="mb-5 rounded-xl border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-200">
+                Sesión cerrada correctamente. Puedes iniciar sesión de nuevo.
               </div>
             )}
 
+            {/* Error */}
             {err && (
-              <div className="mt-4 rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+              <div className="mb-5 rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-200 flex items-start gap-2">
+                <span className="flex-shrink-0">⚠</span>
                 {err}
               </div>
             )}
 
-            <form onSubmit={handleLogin} className="mt-6 space-y-4">
+            <form onSubmit={handleLogin} className="space-y-4">
+              {/* Email */}
               <div>
-                <label className="text-sm text-white/70">Email</label>
+                <label className="text-xs font-medium text-white/50 uppercase tracking-wide">
+                  Email
+                </label>
                 <input
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="mt-2 w-full h-11 rounded-2xl bg-white/5 border border-white/10 px-4 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  className={`mt-1.5 ${inputCls}`}
                   placeholder="you@email.com"
                   type="email"
                   autoComplete="email"
@@ -219,44 +233,77 @@ function LoginPageInner() {
                 />
               </div>
 
+              {/* Password */}
               <div>
-                <label className="text-sm text-white/70">Password</label>
-                <input
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="mt-2 w-full h-11 rounded-2xl bg-white/5 border border-white/10 px-4 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                  placeholder="••••••••"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                />
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-medium text-white/50 uppercase tracking-wide">
+                    Contraseña
+                  </label>
+                  <Link
+                    href="/forgot-password"
+                    className="text-xs text-white/38 hover:text-white/65 transition"
+                  >
+                    ¿Olvidaste tu contraseña?
+                  </Link>
+                </div>
+                <div className="relative">
+                  <input
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className={inputCls}
+                    placeholder="••••••••"
+                    type={showPw ? "text" : "password"}
+                    autoComplete="current-password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPw((v) => !v)}
+                    tabIndex={-1}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-white/32 hover:text-white/60 transition px-1"
+                  >
+                    {showPw ? "Ocultar" : "Ver"}
+                  </button>
+                </div>
               </div>
 
-              <div className="flex items-center justify-end">
-                <Link
-                  href="/forgot-password"
-                  className="text-sm text-white/60 hover:text-white/80"
-                >
-                  Forgot your password?
-                </Link>
-              </div>
-
+              {/* Login button */}
               <button
+                type="submit"
                 disabled={loading}
-                className="w-full h-11 rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:opacity-60 transition font-semibold"
+                className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed transition font-semibold text-sm text-white mt-1"
               >
-                {loading ? "Signing in..." : "Login"}
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="inline-block w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Iniciando sesión…
+                  </span>
+                ) : (
+                  "Iniciar sesión"
+                )}
               </button>
 
+              {/* Divider */}
+              <div className="flex items-center gap-3 py-0.5">
+                <div className="flex-1 h-px bg-white/8" />
+                <span className="text-[11px] text-white/28">o</span>
+                <div className="flex-1 h-px bg-white/8" />
+              </div>
+
+              {/* Signup CTA — includes +25 RP badge to motivate */}
               <Link
                 href="/signup"
-                className="block w-full h-11 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition text-center leading-[44px] text-white/90"
+                className="flex items-center justify-center gap-1.5 w-full h-11 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/6 hover:border-white/15 transition text-sm text-white/65 hover:text-white/85 font-medium"
               >
-                Need an account? <span className="font-semibold">Sign up</span>
+                ¿No tienes cuenta?
+                <span className="text-white font-semibold">Regístrate</span>
+                <span className="rounded-full bg-amber-400/15 border border-amber-400/22 text-amber-300 text-[10px] px-2 py-0.5 font-semibold flex-shrink-0">
+                  +25 RP gratis
+                </span>
               </Link>
 
-              <div className="pt-2 text-center text-xs text-white/45">
-                No gambling • No odds • Skill-based competition
+              <div className="text-center text-[11px] text-white/24 pt-1">
+                No gambling · No odds · Skill-based competition
               </div>
             </form>
           </div>
@@ -271,7 +318,10 @@ export default function LoginPage() {
     <Suspense
       fallback={
         <div className="min-h-screen grid place-items-center bg-[#05070B]">
-          <div className="text-white/70 text-sm">Loading…</div>
+          <div className="flex items-center gap-2 text-white/40 text-sm">
+            <span className="inline-block w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full animate-spin" />
+            Cargando…
+          </div>
         </div>
       }
     >

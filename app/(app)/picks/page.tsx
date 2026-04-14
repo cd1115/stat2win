@@ -21,9 +21,12 @@ import {
   Pie,
   Cell,
 } from "recharts";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { getDayId, getDayLabel } from "@/lib/day";
 
 type Market = "moneyline" | "spread" | "ou";
 type ViewTab = "picks" | "performance";
+type ModeTab = "weekly" | "daily";
 type SportKey = "NBA" | "NFL" | "SOCCER" | "MLB";
 type PerfSport = "ALL" | SportKey;
 
@@ -496,6 +499,7 @@ async function fetchWeekBundle(uid: string, weekId: string) {
 export default function PicksPage() {
   const { user } = useAuth();
 
+  const [modeTab, setModeTab] = useState<ModeTab>("weekly");
   const [viewTab, setViewTab] = useState<ViewTab>("picks");
   const [picksSportFilter, setPicksSportFilter] = useState<PerfSport>("ALL");
   const [perfSport, setPerfSport] = useState<PerfSport>("ALL");
@@ -505,6 +509,38 @@ export default function PicksPage() {
   const [games, setGames] = useState<GameDoc[]>([]);
   const [search, setSearch] = useState("");
   const [err, setErr] = useState<string | null>(null);
+
+  // ── Daily picks state ──
+  // dayOffset: 0 = today, -1 = yesterday, -2 = two days ago, etc.
+  const [dailyDayOffset, setDailyDayOffset] = useState(0);
+
+  const todayDayId = useMemo(() => getDayId(), []);
+
+  const dayId = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + dailyDayOffset);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dd}`;
+  }, [dailyDayOffset]);
+
+  // 7-day expiry cutoff
+  const sevenDaysAgoCutoff = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dd}`;
+  }, []);
+
+  const isToday = dailyDayOffset === 0;
+  const dayLabel = useMemo(() => getDayLabel(dayId, "es-PR"), [dayId]);
+  const [dailyPicks, setDailyPicks] = useState<PickDoc[]>([]);
+  const [dailyGames, setDailyGames] = useState<GameDoc[]>([]);
+  const [dailyLoading, setDailyLoading] = useState(false);
+  const [dailyErr, setDailyErr] = useState<string | null>(null);
 
   const weekDate = useMemo(() => {
     const d = new Date();
@@ -563,6 +599,65 @@ export default function PicksPage() {
     };
   }, [user?.uid, weekId]);
 
+  // ── Daily picks listener (today by default, navigable, expires after 7 days) ──
+  useEffect(() => {
+    if (!user?.uid || modeTab !== "daily") return;
+    setDailyLoading(true);
+    setDailyErr(null);
+    let cancelled = false;
+
+    // Only show picks within last 7 days
+    if (dayId < sevenDaysAgoCutoff) {
+      setDailyPicks([]);
+      setDailyGames([]);
+      setDailyLoading(false);
+      return;
+    }
+
+    const q = query(
+      collection(db, "picks_daily"),
+      where("uid", "==", user.uid),
+      where("dayId", "==", dayId),
+    );
+
+    const unsub = onSnapshot(
+      q,
+      async (snap) => {
+        if (cancelled) return;
+        const fetchedPicks = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+        setDailyPicks(fetchedPicks);
+
+        // Fetch associated games from the "games" collection
+        const gameIds = [...new Set(fetchedPicks.map((p: any) => p.gameDocId || p.gameId).filter(Boolean))];
+        if (gameIds.length > 0) {
+          try {
+            const { getDocs, query: fsQuery, collection: fsCol, where: fsWhere } = await import("firebase/firestore");
+            // Fetch games by their document IDs in batches of 10
+            const batches: GameDoc[] = [];
+            for (let i = 0; i < gameIds.length; i += 10) {
+              const batch = gameIds.slice(i, i + 10);
+              const gSnap = await getDocs(fsQuery(fsCol(db, "games"), fsWhere("__name__", "in", batch)));
+              gSnap.forEach(d => batches.push({ id: d.id, ...d.data() } as GameDoc));
+            }
+            if (!cancelled) setDailyGames(batches);
+          } catch {
+            // games fetch failed, continue without them
+          }
+        } else {
+          setDailyGames([]);
+        }
+        setDailyLoading(false);
+      },
+      (e) => {
+        if (cancelled) return;
+        setDailyErr(String((e as any)?.message ?? e));
+        setDailyLoading(false);
+      }
+    );
+
+    return () => { cancelled = true; unsub(); };
+  }, [user?.uid, dayId, modeTab, sevenDaysAgoCutoff]);
+
   const gamesById = useMemo(() => {
     const map: Record<string, GameDoc> = {};
     for (const g of games) {
@@ -578,6 +673,113 @@ export default function PicksPage() {
     }
     return map;
   }, [games]);
+
+  // ── Daily games lookup map ──
+  const dailyGamesById = useMemo(() => {
+    const map: Record<string, GameDoc> = {};
+    for (const g of dailyGames) {
+      const keys = [
+        String(g.gameId ?? ""),
+        String(g.id ?? ""),
+        String((g as any).oddsEventId ?? ""),
+        String((g as any).matchKey ?? ""),
+      ].filter(Boolean);
+      for (const k of keys) map[k] = g;
+    }
+    return map;
+  }, [dailyGames]);
+
+  // ── Daily enriched picks (same logic as weekly) ──
+  const dailyEnriched = useMemo(() => {
+    return (dailyPicks as PickDoc[]).map((p) => {
+      const g =
+        dailyGamesById[p.gameId] ||
+        (p.gameDocId ? dailyGamesById[p.gameDocId] : undefined);
+
+      const computed = resolveOutcome(p, g);
+      const final =
+        p.result && p.result !== "pending" ? true : isFinalStatus(g?.status);
+      const storedOutcome =
+        p.result && p.result !== "pending" ? p.result : null;
+      const outcome =
+        storedOutcome ??
+        computed.outcome ??
+        inferOutcomeFromPoints(p.pointsAwarded, final);
+
+      const points =
+        outcome === "win"
+          ? 100
+          : outcome === "loss"
+            ? 0
+            : outcome === "push"
+              ? 50
+              : (computed.points ??
+                (typeof p.pointsAwarded === "number" ? p.pointsAwarded : null));
+      const start = getStart(g);
+      const locked = isLocked(g);
+      const text = pickText(p, g);
+
+      return {
+        pick: p,
+        game: g,
+        start,
+        locked,
+        points,
+        final,
+        won: outcome === "win" ? true : outcome === "loss" ? false : null,
+        outcome,
+        text,
+        sport: String(p.sport || "").toUpperCase(),
+      };
+    });
+  }, [dailyPicks, dailyGamesById]);
+
+  // ── Daily grouped picks (same grouping logic as weekly) ──
+  const dailyGrouped = useMemo(() => {
+    const sportMap = new Map<string, Map<string, { sport: string; game: GameDoc | undefined; start: Date | null; rows: typeof dailyEnriched; status: string }>>();
+
+    for (const row of dailyEnriched) {
+      const sport = String(row.pick.sport || "OTHER").toUpperCase();
+      const gameKey = String(row.pick.gameDocId || row.pick.gameId || row.game?.id || row.game?.gameId || `${sport}-${row.pick.id}`) || `${sport}-${row.pick.id}`;
+
+      if (!sportMap.has(sport)) sportMap.set(sport, new Map());
+      const gameMap = sportMap.get(sport)!;
+      const current = gameMap.get(gameKey) || { sport, game: row.game, start: row.start ?? null, rows: [], status: String(row.game?.status || "") };
+      current.rows.push(row);
+      if (!current.game && row.game) current.game = row.game;
+      if (!current.start && row.start) current.start = row.start;
+      if (!current.status && row.game?.status) current.status = String(row.game.status);
+      gameMap.set(gameKey, current);
+    }
+
+    return Array.from(sportMap.entries())
+      .sort((a, b) => {
+        const aIdx = AVAILABLE_SPORTS.indexOf(a[0] as SportKey);
+        const bIdx = AVAILABLE_SPORTS.indexOf(b[0] as SportKey);
+        if (aIdx === -1 && bIdx === -1) return a[0].localeCompare(b[0]);
+        if (aIdx === -1) return 1;
+        if (bIdx === -1) return -1;
+        return aIdx - bIdx;
+      })
+      .map(([sport, gameMap]) => ({
+        sport,
+        groups: Array.from(gameMap.values())
+          .map(group => ({
+            ...group,
+            rows: [...group.rows].sort((a, b) => {
+              const order = { moneyline: 0, spread: 1, ou: 2 } as Record<string, number>;
+              return (order[inferMarket(a.pick)] ?? 9) - (order[inferMarket(b.pick)] ?? 9) || (a.start?.getTime() ?? 0) - (b.start?.getTime() ?? 0);
+            }),
+          }))
+          .sort((a, b) => {
+            const aPending = a.rows.some(r => !r.outcome);
+            const bPending = b.rows.some(r => !r.outcome);
+            if (aPending && !bPending) return -1;
+            if (!aPending && bPending) return 1;
+            return (b.start?.getTime() ?? 0) - (a.start?.getTime() ?? 0);
+          }),
+      }));
+  }, [dailyEnriched]);
 
   const enriched = useMemo(() => {
     return picks.map((p) => {
@@ -740,9 +942,18 @@ export default function PicksPage() {
               );
             }),
           }))
-          .sort(
-            (a, b) => (a.start?.getTime() ?? 0) - (b.start?.getTime() ?? 0),
-          ),
+          .sort((a, b) => {
+  // ✅ Pending arriba, resueltos abajo
+  const aPending = a.rows.some((r) => !r.outcome);
+  const bPending = b.rows.some((r) => !r.outcome);
+  if (aPending && !bPending) return -1;
+  if (!aPending && bPending) return 1;
+
+  // ✅ Dentro de cada grupo: más tarde arriba (8pm antes que 1pm)
+  const aMs = a.start?.getTime() ?? 0;
+  const bMs = b.start?.getTime() ?? 0;
+  return bMs - aMs; // descendente = más reciente arriba
+}),
       }));
   }, [filtered]);
 
@@ -854,59 +1065,152 @@ export default function PicksPage() {
               <div className="min-w-0">
                 <h1 className="text-3xl font-semibold text-white">My Picks</h1>
                 <p className="mt-1 text-white/60">
-                  All your picks for the selected week, grouped by game.
+                  {modeTab === "daily"
+                    ? isToday
+                      ? "Tus picks de hoy, agrupados por juego."
+                      : `Tus picks del ${dayLabel}.`
+                    : "All your picks for the selected week, grouped by game."}
                 </p>
 
-                <div className="mt-4 flex items-center gap-2">
+                {/* Mode tabs: Weekly / Daily */}
+                <div className="mt-4 flex items-center gap-1 rounded-2xl border border-white/8 bg-white/[0.02] p-1 w-fit">
                   <button
-                    onClick={() => setViewTab("picks")}
-                    className={`rounded-xl px-4 py-2 text-sm ${
-                      viewTab === "picks"
+                    onClick={() => setModeTab("weekly")}
+                    className={[
+                      "rounded-xl px-4 py-2 text-sm font-medium transition-all",
+                      modeTab === "weekly"
                         ? "bg-white/10 text-white"
-                        : "text-white/70 hover:text-white"
-                    }`}
+                        : "text-white/40 hover:text-white/70",
+                    ].join(" ")}
                   >
-                    Picks
+                    Weekly
                   </button>
                   <button
-                    onClick={() => setViewTab("performance")}
-                    className={`rounded-xl px-4 py-2 text-sm ${
-                      viewTab === "performance"
-                        ? "bg-white/10 text-white"
-                        : "text-white/70 hover:text-white"
-                    }`}
+                    onClick={() => setModeTab("daily")}
+                    className={[
+                      "rounded-xl px-4 py-2 text-sm font-medium transition-all flex items-center gap-1.5",
+                      modeTab === "daily"
+                        ? "bg-amber-400/10 border border-amber-400/20 text-amber-300"
+                        : "text-white/40 hover:text-white/70",
+                    ].join(" ")}
                   >
-                    Performance
+                    <span className={`inline-flex h-1.5 w-1.5 rounded-full bg-amber-400 ${modeTab === "daily" ? "animate-pulse" : "opacity-40"}`} />
+                    Daily
                   </button>
                 </div>
+
+                {/* Sub-tabs only for weekly mode */}
+                {modeTab === "weekly" && (
+                  <div className="mt-3 flex items-center gap-2">
+                    <button
+                      onClick={() => setViewTab("picks")}
+                      className={`rounded-xl px-4 py-2 text-sm ${
+                        viewTab === "picks"
+                          ? "bg-white/10 text-white"
+                          : "text-white/70 hover:text-white"
+                      }`}
+                    >
+                      Picks
+                    </button>
+                    <button
+                      onClick={() => setViewTab("performance")}
+                      className={`rounded-xl px-4 py-2 text-sm ${
+                        viewTab === "performance"
+                          ? "bg-white/10 text-white"
+                          : "text-white/70 hover:text-white"
+                      }`}
+                    >
+                      Performance
+                    </button>
+                  </div>
+                )}
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => setWeekOffset((v) => v - 1)}
-                  className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/80 hover:bg-white/5"
-                >
-                  ← Prev
-                </button>
-                <button
-                  onClick={() => setWeekOffset(0)}
-                  className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/80 hover:bg-white/5"
-                >
-                  Current
-                </button>
-                <button
-                  onClick={() => setWeekOffset((v) => v + 1)}
-                  className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/80 hover:bg-white/5"
-                >
-                  Next →
-                </button>
-                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white/80">
-                  Week <span className="ml-2 text-white">{weekId}</span>
+              {modeTab === "weekly" && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => setWeekOffset((v) => v - 1)}
+                    className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/80 hover:bg-white/5"
+                  >
+                    ← Prev
+                  </button>
+                  <button
+                    onClick={() => setWeekOffset(0)}
+                    className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/80 hover:bg-white/5"
+                  >
+                    Current
+                  </button>
+                  <button
+                    onClick={() => setWeekOffset((v) => v + 1)}
+                    className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/80 hover:bg-white/5"
+                  >
+                    Next →
+                  </button>
+                  <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white/80">
+                    Week <span className="ml-2 text-white">{weekId}</span>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {modeTab === "daily" && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Day navigation */}
+                  <div className="flex items-center rounded-xl border border-white/10 bg-black/20 p-0.5">
+                    <button
+                      onClick={() => setDailyDayOffset(v => Math.max(v - 1, -7))}
+                      disabled={dayId <= sevenDaysAgoCutoff}
+                      className={[
+                        "rounded-lg px-3 py-1.5 text-sm transition",
+                        dayId <= sevenDaysAgoCutoff
+                          ? "text-white/20 cursor-default"
+                          : "text-white/60 hover:bg-white/8 hover:text-white",
+                      ].join(" ")}
+                    >
+                      ← Prev
+                    </button>
+                    <button
+                      onClick={() => setDailyDayOffset(0)}
+                      disabled={isToday}
+                      className={[
+                        "rounded-lg px-3 py-1.5 text-sm transition",
+                        isToday
+                          ? "text-white/20 cursor-default"
+                          : "text-white/60 hover:bg-white/8 hover:text-white",
+                      ].join(" ")}
+                    >
+                      Hoy
+                    </button>
+                    <button
+                      onClick={() => setDailyDayOffset(v => Math.min(v + 1, 0))}
+                      disabled={isToday}
+                      className={[
+                        "rounded-lg px-3 py-1.5 text-sm transition",
+                        isToday
+                          ? "text-white/20 cursor-default"
+                          : "text-white/60 hover:bg-white/8 hover:text-white",
+                      ].join(" ")}
+                    >
+                      Next →
+                    </button>
+                  </div>
+                  <span className={[
+                    "rounded-2xl border px-4 py-2 text-sm",
+                    isToday
+                      ? "border-amber-400/20 bg-amber-400/8 text-amber-300/80"
+                      : "border-white/10 bg-black/20 text-white/60",
+                  ].join(" ")}>
+                    {isToday && <span className="inline-flex h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse mr-2" />}
+                    {dayLabel}
+                  </span>
+                </div>
+              )}
             </div>
 
-            <div className="mt-3 text-sm text-white/50">{weekLabel}</div>
+            <div className="mt-3 text-sm text-white/50">
+              {modeTab === "daily"
+                ? (isToday ? `Hoy · ${dayLabel}` : dayLabel)
+                : weekLabel}
+            </div>
           </div>
         </Card>
 
@@ -916,6 +1220,262 @@ export default function PicksPage() {
           </div>
         ) : null}
 
+        {/* ── DAILY PICKS PANEL ── */}
+        {modeTab === "daily" && (
+          <div className="mt-6">
+            {dailyErr && (
+              <div className="mb-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                {dailyErr}
+              </div>
+            )}
+
+            {/* Sport filter bar */}
+            {!dailyLoading && dailyEnriched.length > 0 && (
+              <Card>
+                <div className="p-4 md:p-6">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white/70">
+                      {dailyEnriched.length} pick(s) · ayer
+                    </div>
+                    {dailyGrouped.map(({ sport }) => {
+                      const meta = SPORT_META[sport as SportKey] ?? null;
+                      return (
+                        <div key={sport} className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-sm ${meta?.soft ?? "border-white/10 bg-black/20"}`}>
+                          <LeagueBadge sport={sport} size={16} />
+                          <span className={`font-medium ${meta?.accent ?? "text-white/70"}`}>{sport}</span>
+                          <span className="text-white/50">{dailyGrouped.find(g => g.sport === sport)?.groups.reduce((acc, g) => acc + g.rows.length, 0) ?? 0}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </Card>
+            )}
+
+            {dailyLoading ? (
+              <Card>
+                <div className="p-6 space-y-3">
+                  <div className="h-5 w-40 animate-pulse rounded bg-white/10" />
+                  <div className="h-32 animate-pulse rounded-2xl bg-white/5" />
+                  <div className="h-32 animate-pulse rounded-2xl bg-white/5" />
+                </div>
+              </Card>
+            ) : dailyEnriched.length === 0 ? (
+              <Card>
+                <div className="p-6 md:p-8">
+                  <div className="py-8 text-center">
+                    <div className="text-2xl mb-3">🎯</div>
+                    <div className="text-white/50 text-sm">
+                      {isToday ? "No hay picks para hoy todavía." : `No hay picks para el ${dayLabel}.`}
+                    </div>
+                    {isToday && (
+                      <div className="mt-4 flex justify-center gap-3">
+                        <a href="/tournaments/daily?sport=NBA"
+                          className="rounded-xl border border-blue-400/20 bg-blue-500/10 px-4 py-2 text-sm text-blue-300 hover:bg-blue-500/15 transition">
+                          NBA Daily →
+                        </a>
+                        <a href="/tournaments/daily?sport=MLB"
+                          className="rounded-xl border border-sky-400/20 bg-sky-500/10 px-4 py-2 text-sm text-sky-300 hover:bg-sky-500/15 transition">
+                          MLB Daily →
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            ) : (
+              <>
+                {dailyGrouped.map(({ sport, groups }) => {
+                  const meta = SPORT_META[sport as SportKey];
+                  return (
+                    <div key={sport} className="mt-4">
+                      {/* Sport header */}
+                      <div className="mb-3 flex items-center gap-3">
+                        <LeagueBadge sport={sport} size={20} />
+                        <span className={`text-sm font-bold uppercase tracking-wider ${meta?.accent ?? "text-white/70"}`}>
+                          {meta?.label ?? sport}
+                        </span>
+                        <span className="text-xs text-white/30">
+                          {groups.reduce((acc, g) => acc + g.rows.length, 0)} pick(s)
+                        </span>
+                      </div>
+
+                      {/* Game cards */}
+                      <div className="space-y-3">
+                        {groups.map((group, gIdx) => {
+                          const game = group.game;
+                          const homeAbbr = game?.homeTeamAbbr || game?.homeTeam || game?.home || "HOME";
+                          const awayAbbr = game?.awayTeamAbbr || game?.awayTeam || game?.away || "AWAY";
+                          const { home: scoreHome, away: scoreAway } = getScores(game);
+                          const isFinal = isFinalStatus(game?.status);
+                          const startDate = group.start;
+
+                          return (
+                            <div key={gIdx} className="rounded-3xl border border-white/10 bg-white/[0.04] overflow-hidden">
+                              {/* Game header */}
+                              <div className="flex items-center justify-between border-b border-white/[0.06] bg-black/20 px-4 py-3">
+                                <div className="flex items-center gap-3">
+                                  {isFinal ? (
+                                    <span className="rounded-lg border border-white/15 bg-white/8 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white/60">
+                                      Final
+                                    </span>
+                                  ) : group.status ? (
+                                    <span className="rounded-lg border border-amber-400/20 bg-amber-400/8 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-amber-300/70">
+                                      {group.status}
+                                    </span>
+                                  ) : null}
+                                  <LeagueBadge sport={sport} size={14} />
+                                </div>
+                                <span className="text-xs text-white/30">
+                                  {startDate ? prettyStartLabel(game, startDate) : prettyStartLabel(game)}
+                                </span>
+                              </div>
+
+                              {/* Teams + score */}
+                              <div className="flex items-center gap-4 px-4 py-4">
+                                <div className="flex flex-1 items-center gap-3">
+                                  <TeamBadge sport={sport} abbr={awayAbbr} fallback={awayAbbr} />
+                                  <div>
+                                    <div className="text-sm font-semibold text-white">{awayAbbr}</div>
+                                    <div className="text-xs text-white/40">Away</div>
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-col items-center gap-1 px-2">
+                                  {isFinal && scoreHome != null && scoreAway != null ? (
+                                    <>
+                                      <div className="text-lg font-black tabular-nums text-white">
+                                        {scoreAway} – {scoreHome}
+                                      </div>
+                                      <div className="text-[10px] text-white/30 uppercase tracking-wider">Final</div>
+                                    </>
+                                  ) : (
+                                    <div className="text-xs text-white/30">vs</div>
+                                  )}
+                                </div>
+
+                                <div className="flex flex-1 items-center justify-end gap-3">
+                                  <div className="text-right">
+                                    <div className="text-sm font-semibold text-white">{homeAbbr}</div>
+                                    <div className="text-xs text-white/40">Home</div>
+                                  </div>
+                                  <TeamBadge sport={sport} abbr={homeAbbr} fallback={homeAbbr} />
+                                </div>
+                              </div>
+
+                              {/* Pick rows */}
+                              <div className="divide-y divide-white/[0.04]">
+                                {group.rows.map((row) => {
+                                  const market = inferMarket(row.pick);
+                                  const marketLabel =
+                                    market === "moneyline" ? "ML"
+                                    : market === "spread" ? "Spread"
+                                    : "O/U";
+
+                                  return (
+                                    <div key={row.pick.id}
+                                      className={[
+                                        "flex items-center justify-between px-4 py-3 gap-3",
+                                        row.outcome === "win"  ? "bg-emerald-500/5"
+                                        : row.outcome === "loss" ? "bg-red-500/5"
+                                        : row.outcome === "push" ? "bg-yellow-500/5"
+                                        : "",
+                                      ].join(" ")}
+                                    >
+                                      <div className="flex items-center gap-3 min-w-0">
+                                        <span className="shrink-0 rounded-lg border border-white/10 bg-black/30 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white/50">
+                                          {marketLabel}
+                                        </span>
+                                        <div className="min-w-0">
+                                          <div className="text-sm font-semibold text-white truncate">
+                                            Your pick
+                                          </div>
+                                          <div className={[
+                                            "text-base font-black truncate",
+                                            row.outcome === "win"  ? "text-emerald-300"
+                                            : row.outcome === "loss" ? "text-red-300"
+                                            : row.outcome === "push" ? "text-yellow-300"
+                                            : "text-white/80",
+                                          ].join(" ")}>
+                                            {row.text}
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex items-center gap-3 shrink-0">
+                                        {/* Outcome badge */}
+                                        {row.outcome ? (
+                                          <span className={[
+                                            "rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-wider",
+                                            row.outcome === "win"  ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                                            : row.outcome === "loss" ? "border-red-400/30 bg-red-400/10 text-red-300"
+                                            : "border-yellow-400/30 bg-yellow-400/10 text-yellow-300",
+                                          ].join(" ")}>
+                                            {row.outcome === "win" ? "WIN" : row.outcome === "loss" ? "LOSS" : "PUSH"}
+                                          </span>
+                                        ) : (
+                                          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/40">
+                                            Pending
+                                          </span>
+                                        )}
+
+                                        {/* Points */}
+                                        <div className="text-right min-w-[60px]">
+                                          <div className="text-xs text-white/30">Points</div>
+                                          <div className={[
+                                            "text-sm font-black tabular-nums",
+                                            row.outcome === "win"  ? "text-emerald-300"
+                                            : row.outcome === "push" ? "text-yellow-300"
+                                            : row.outcome === "loss" ? "text-white/30"
+                                            : "text-white/50",
+                                          ].join(" ")}>
+                                            {row.points != null ? row.points : "—"}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Daily summary */}
+                {(() => {
+                  const wins   = dailyEnriched.filter(r => r.outcome === "win").length;
+                  const losses = dailyEnriched.filter(r => r.outcome === "loss").length;
+                  const pushes = dailyEnriched.filter(r => r.outcome === "push").length;
+                  const pts    = dailyEnriched.reduce((acc, r) => acc + (r.points ?? 0), 0);
+                  const hasResolved = wins + losses + pushes > 0;
+                  if (!hasResolved) return null;
+                  return (
+                    <div className="mt-4 grid grid-cols-4 gap-2">
+                      {[
+                        { label: "Wins",   val: wins,   color: "text-emerald-300" },
+                        { label: "Losses", val: losses, color: "text-red-300" },
+                        { label: "Push",   val: pushes, color: "text-yellow-300" },
+                        { label: "Points", val: pts,    color: "text-white" },
+                      ].map(({ label, val, color }) => (
+                        <div key={label} className="rounded-2xl border border-white/8 bg-white/[0.02] p-3 text-center">
+                          <div className={`text-xl font-black ${color}`}>{val}</div>
+                          <div className="text-[10px] text-white/30 mt-0.5">{label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── WEEKLY PICKS PANEL ── */}
+        {modeTab === "weekly" && (
         <div className="mt-6">
           {viewTab === "picks" ? (
             <>
@@ -1001,232 +1561,183 @@ export default function PicksPage() {
                 {groupedPicks.map(({ sport, groups }) => {
                   const meta = SPORT_META[sport as SportKey];
                   return (
-                    <div key={sport} className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`rounded-2xl border px-4 py-2 ${
-                              meta?.soft ?? "border-white/10 bg-black/20"
-                            }`}
-                          >
-                            <div className="mr-2 inline-flex items-center"><LeagueBadge sport={sport} size={18} /></div>
-                            <span className="text-sm font-semibold text-white">
-                              {meta?.label ?? sport}
-                            </span>
-                          </div>
-                          <div className="text-sm text-white/45">
-                            {groups.reduce((acc, g) => acc + g.rows.length, 0)}{" "}
-                            pick(s)
-                          </div>
-                        </div>
+                    <div key={sport} className="space-y-3">
+                      {/* Sport header — same style as daily */}
+                      <div className="flex items-center gap-3 mb-1">
+                        <LeagueBadge sport={sport} size={20} />
+                        <span className={`text-sm font-bold uppercase tracking-wider ${meta?.accent ?? "text-white/70"}`}>
+                          {meta?.label ?? sport}
+                        </span>
+                        <span className="text-xs text-white/30">
+                          {groups.reduce((acc, g) => acc + g.rows.length, 0)} pick(s)
+                        </span>
                       </div>
 
                       {groups.map((group) => {
                         const g = group.game;
-                        const ht = teamLabel(
-                          g?.homeTeamAbbr || g?.homeTeam || g?.home,
-                        );
-                        const at = teamLabel(
-                          g?.awayTeamAbbr || g?.awayTeam || g?.away,
-                        );
-                        const homeAbbr = teamLabel(
-                          g?.homeTeamAbbr || g?.homeTeam || g?.home,
-                        );
-                        const awayAbbr = teamLabel(
-                          g?.awayTeamAbbr || g?.awayTeam || g?.away,
-                        );
-                        const status = String(g?.status || "").toLowerCase();
+                        const homeAbbr = g?.homeTeamAbbr || g?.homeTeam || g?.home || "HOME";
+                        const awayAbbr = g?.awayTeamAbbr || g?.awayTeam || g?.away || "AWAY";
+                        const { home: scoreHome, away: scoreAway } = getScores(g);
+                        const isFinal = isFinalStatus(g?.status);
+                        const startDate = group.start;
+
+                        // Compute timestamp for game header
+                        const raw = g?.startTime ?? g?.startsAt ?? null;
+                        const ms = raw?._seconds
+                          ? raw._seconds * 1000
+                          : raw?.seconds
+                            ? raw.seconds * 1000
+                            : typeof raw === "number" ? raw : null;
+                        const startObj = ms ? new Date(ms) : startDate ?? null;
+                        const startLabel = startObj
+                          ? startObj.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+                          : prettyStartLabel(g);
 
                         const normalized = group.rows.map((row) => {
                           const inferredOutcome =
                             row.outcome ??
                             (row.final
-                              ? (row.points ?? 0) > 0
-                                ? "win"
-                                : (row.points ?? 0) === 50
-                                  ? "push"
-                                  : "loss"
+                              ? (row.points ?? 0) > 0 ? "win"
+                                : (row.points ?? 0) === 50 ? "push"
+                                : "loss"
                               : null);
-
-                          return {
-                            ...row,
-                            normalizedOutcome: inferredOutcome,
-                          };
+                          return { ...row, normalizedOutcome: inferredOutcome };
                         });
 
-                        const hasLoss = normalized.some(
-                          (r) => r.normalizedOutcome === "loss",
-                        );
-                        const hasPending = normalized.some(
-                          (r) => !r.normalizedOutcome,
-                        );
-                        const hasWin = normalized.some(
-                          (r) => r.normalizedOutcome === "win",
-                        );
-                        const hasPush = normalized.some(
-                          (r) => r.normalizedOutcome === "push",
-                        );
-
-                        const cardTone =
-                          hasWin && hasLoss
-                            ? "mixed"
-                            : hasWin
-                              ? "win"
-                              : hasLoss
-                                ? "loss"
-                                : hasPush
-                                  ? "push"
-                                  : "pending";
+                        const hasLoss    = normalized.some(r => r.normalizedOutcome === "loss");
+                        const hasWin     = normalized.some(r => r.normalizedOutcome === "win");
+                        const hasPush    = normalized.some(r => r.normalizedOutcome === "push");
+                        const cardTone   = hasWin && hasLoss ? "mixed" : hasWin ? "win" : hasLoss ? "loss" : hasPush ? "push" : "pending";
 
                         return (
-                          <div
-                            key={`${sport}-${group.rows[0]?.pick.id ?? "group"}`}
-                            className={[
-                              "rounded-3xl border bg-white/[0.04] backdrop-blur-xl transition",
-                              cardTone === "win"
-                                ? "border-emerald-500/30 shadow-[0_0_0_1px_rgba(16,185,129,0.10),0_0_24px_rgba(16,185,129,0.10)]"
-                                : cardTone === "loss"
-                                  ? "border-red-500/30 shadow-[0_0_0_1px_rgba(239,68,68,0.10),0_0_24px_rgba(239,68,68,0.10)]"
-                                  : cardTone === "push"
-                                    ? "border-yellow-500/30 shadow-[0_0_0_1px_rgba(250,204,21,0.10),0_0_24px_rgba(250,204,21,0.08)]"
-                                    : cardTone === "mixed"
-                                      ? "border-slate-400/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.05),rgba(239,68,68,0.05))] shadow-[0_0_0_1px_rgba(148,163,184,0.08)]"
-                                      : "border-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]",
-                            ].join(" ")}
+                          <div key={`${sport}-${group.rows[0]?.pick.id ?? "group"}`}
+                            className="rounded-3xl border border-white/10 bg-white/[0.04] overflow-hidden"
                           >
-                            <div className="p-5 md:p-6">
-                              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-white/80">
-                                      {isFinalStatus(g?.status)
-                                        ? "Final"
-                                        : status || "scheduled"}
-                                    </span>
-                                    <span
-                                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${
-                                        meta?.soft ??
-                                        "border-white/10 bg-black/20 text-white/80"
-                                      } ${meta?.accent ?? "text-white/80"}`}
-                                    >
-                                      <LeagueBadge sport={sport} size={14} />
-                                      {meta?.label ?? sport}
-                                    </span>
-                                    {group.rows.some((r) => r.locked) ? (
-                                      <span className="rounded-full border border-yellow-500/30 bg-yellow-500/10 px-3 py-1 text-xs text-yellow-200">
-                                        Locked
-                                      </span>
-                                    ) : null}
-                                  </div>
+                            {/* Game header bar */}
+                            <div className="flex items-center justify-between border-b border-white/[0.06] bg-black/20 px-4 py-3">
+                              <div className="flex items-center gap-3">
+                                {isFinal ? (
+                                  <span className="rounded-lg border border-white/15 bg-white/8 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white/60">Final</span>
+                                ) : g?.status ? (
+                                  <span className={`rounded-lg border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider ${
+                                    String(g.status).toLowerCase() === "inprogress"
+                                      ? "border-red-400/20 bg-red-400/8 text-red-300/70"
+                                      : "border-amber-400/20 bg-amber-400/8 text-amber-300/70"
+                                  }`}>{String(g.status).toUpperCase()}</span>
+                                ) : (
+                                  <span className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white/40">Scheduled</span>
+                                )}
+                                <LeagueBadge sport={sport} size={14} />
+                                {group.rows.some(r => r.locked) && (
+                                  <span className="rounded-lg border border-yellow-500/20 bg-yellow-500/8 px-2 py-0.5 text-[10px] font-semibold text-yellow-300/70">Locked</span>
+                                )}
+                              </div>
+                              <span className="text-xs text-white/30">{startLabel}</span>
+                            </div>
 
-                                  <div className="mt-4 flex flex-wrap items-center gap-3 text-xl font-semibold text-white">
-                                    <div className="flex items-center gap-3">
-                                      <TeamBadge
-                                        sport={sport}
-                                        abbr={awayAbbr}
-                                        fallback={awayAbbr}
-                                      />
-                                      <span>{at}</span>
-                                    </div>
-                                    <span className="text-white/35">@</span>
-                                    <div className="flex items-center gap-3">
-                                      <TeamBadge
-                                        sport={sport}
-                                        abbr={homeAbbr}
-                                        fallback={homeAbbr}
-                                      />
-                                      <span>{ht}</span>
-                                    </div>
-                                  </div>
-
-                                  <div className="mt-2 text-sm text-white/60">
-                                    {prettyStartLabel(g, group.start)}
-                                    {g?.status &&
-                                    prettyStartLabel(g, group.start) !==
-                                      String(g.status).toUpperCase()
-                                      ? ` • ${String(g.status).toUpperCase()}`
-                                      : ""}
-                                  </div>
-                                </div>
-
-                                <div className="w-full lg:w-[320px]">
-                                  <div className="flex flex-col gap-2">
-                                    {normalized.map((row) => {
-                                      const tone = row.normalizedOutcome;
-                                      return (
-                                        <div
-                                          key={row.pick.id}
-                                          className={`rounded-2xl border px-4 py-3 ${
-                                            tone === "win"
-                                              ? "border-emerald-500/20 bg-emerald-500/5"
-                                              : tone === "loss"
-                                                ? "border-red-500/20 bg-red-500/5"
-                                                : tone === "push"
-                                                  ? "border-yellow-500/20 bg-yellow-500/5"
-                                                  : "border-white/10 bg-black/20"
-                                          }`}
-                                        >
-                                          <div className="flex items-start justify-between gap-3">
-                                            <div className="min-w-0">
-                                              <div className="text-xs text-white/60">
-                                                Your pick
-                                              </div>
-                                              <div className="truncate text-[1.05rem] font-semibold text-white">
-                                                {row.text}
-                                              </div>
-                                            </div>
-
-                                            <div
-                                              className={`inline-flex min-w-[72px] items-center justify-center rounded-xl px-3 py-1 text-sm font-semibold ${
-                                                tone === "win"
-                                                  ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
-                                                  : tone === "loss"
-                                                    ? "bg-red-500/10 text-red-300 border border-red-500/20"
-                                                    : tone === "push"
-                                                      ? "bg-yellow-500/10 text-yellow-200 border border-yellow-500/20"
-                                                      : row.final
-                                                        ? "bg-white/5 text-white border border-white/10"
-                                                        : "bg-white/5 text-white border border-white/10"
-                                              }`}
-                                            >
-                                              {tone
-                                                ? tone.toUpperCase()
-                                                : row.final
-                                                  ? "FINAL"
-                                                  : "PENDING"}
-                                            </div>
-                                          </div>
-
-                                          <div className="mt-2 grid grid-cols-2 gap-2">
-                                            <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-center">
-                                              <div className="text-[11px] text-white/60">
-                                                Points
-                                              </div>
-                                              <div className="text-lg font-semibold text-white">
-                                                {row.points ?? "—"}
-                                              </div>
-                                            </div>
-                                            <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-center">
-                                              <div className="text-[11px] text-white/60">
-                                                Market
-                                              </div>
-                                              <div className="text-sm font-semibold text-white uppercase">
-                                                {inferMarket(row.pick) ===
-                                                "moneyline"
-                                                  ? "ML"
-                                                  : inferMarket(row.pick) ===
-                                                      "spread"
-                                                    ? "SPREAD"
-                                                    : "OU"}
-                                              </div>
-                                            </div>
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
+                            {/* Teams + score row */}
+                            <div className="flex items-center gap-4 px-4 py-4">
+                              <div className="flex flex-1 items-center gap-3">
+                                <TeamBadge sport={sport} abbr={awayAbbr} fallback={awayAbbr} />
+                                <div>
+                                  <div className="text-sm font-semibold text-white">{awayAbbr}</div>
+                                  <div className="text-xs text-white/40">Away</div>
                                 </div>
                               </div>
+
+                              <div className="flex flex-col items-center gap-0.5 px-2 min-w-[90px]">
+                                {isFinal && scoreHome != null && scoreAway != null ? (
+                                  <>
+                                    <div className="text-xl font-black tabular-nums text-white">{scoreAway} – {scoreHome}</div>
+                                    <div className="text-[10px] text-white/30 uppercase tracking-wider">Final</div>
+                                  </>
+                                ) : (
+                                  <div className="text-xs text-white/30">vs</div>
+                                )}
+                              </div>
+
+                              <div className="flex flex-1 items-center justify-end gap-3">
+                                <div className="text-right">
+                                  <div className="text-sm font-semibold text-white">{homeAbbr}</div>
+                                  <div className="text-xs text-white/40">Home</div>
+                                </div>
+                                <TeamBadge sport={sport} abbr={homeAbbr} fallback={homeAbbr} />
+                              </div>
+                            </div>
+
+                            {/* Pick rows */}
+                            <div className="divide-y divide-white/[0.04]">
+                              {normalized.map((row) => {
+                                const tone = row.normalizedOutcome;
+                                const market = inferMarket(row.pick);
+                                const marketLabel = market === "moneyline" ? "ML" : market === "spread" ? "Spread" : "O/U";
+
+                                return (
+                                  <div key={row.pick.id}
+                                    className={[
+                                      "flex items-center justify-between px-4 py-3.5 gap-3",
+                                      tone === "win"  ? "bg-emerald-500/5"
+                                      : tone === "loss" ? "bg-red-500/5"
+                                      : tone === "push" ? "bg-yellow-500/5"
+                                      : "",
+                                    ].join(" ")}
+                                  >
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <span className="shrink-0 rounded-lg border border-white/10 bg-black/30 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white/50">
+                                        {marketLabel}
+                                      </span>
+                                      <div className="min-w-0">
+                                        <div className="text-xs text-white/50">Your pick</div>
+                                        <div className={[
+                                          "text-base font-black truncate",
+                                          tone === "win"  ? "text-emerald-300"
+                                          : tone === "loss" ? "text-red-300"
+                                          : tone === "push" ? "text-yellow-300"
+                                          : "text-white/80",
+                                        ].join(" ")}>
+                                          {row.text}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-3 shrink-0">
+                                      {tone ? (
+                                        <span className={[
+                                          "rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-wider",
+                                          tone === "win"  ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                                          : tone === "loss" ? "border-red-400/30 bg-red-400/10 text-red-300"
+                                          : "border-yellow-400/30 bg-yellow-400/10 text-yellow-300",
+                                        ].join(" ")}>
+                                          {tone === "win" ? "WIN" : tone === "loss" ? "LOSS" : "PUSH"}
+                                        </span>
+                                      ) : (
+                                        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/40">
+                                          {row.final ? "Final" : "Pending"}
+                                        </span>
+                                      )}
+
+                                      <div className="grid grid-cols-2 gap-2 text-center">
+                                        <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-1.5">
+                                          <div className="text-[10px] text-white/40">Points</div>
+                                          <div className={[
+                                            "text-sm font-black tabular-nums",
+                                            tone === "win" ? "text-emerald-300"
+                                            : tone === "push" ? "text-yellow-300"
+                                            : tone === "loss" ? "text-white/30"
+                                            : "text-white/60",
+                                          ].join(" ")}>
+                                            {row.points ?? "—"}
+                                          </div>
+                                        </div>
+                                        <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-1.5">
+                                          <div className="text-[10px] text-white/40">Market</div>
+                                          <div className="text-sm font-black text-white/70 uppercase">{marketLabel}</div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
                         );
@@ -1459,6 +1970,7 @@ export default function PicksPage() {
             </>
           )}
         </div>
+        )}
       </div>
     </Protected>
   );

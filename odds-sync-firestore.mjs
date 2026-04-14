@@ -91,48 +91,81 @@ function mapTeam(league, oddsName) {
 
 /* ================= EXTRACT LINES ================= */
 
-function extractLinesFromEvent(ev) {
-  const dk = (ev.bookmakers || []).find((b) => b.key === "draftkings");
-  if (!dk) return null;
+/**
+ * Priority order for bookmakers.
+ * We try each in order and take the FIRST one that has the data we need.
+ * This way if DraftKings doesn't have spread/total yet, we fall back to FanDuel, etc.
+ */
+const BOOKMAKER_PRIORITY = [
+  "draftkings",
+  "fanduel",
+  "betmgm",
+  "williamhill_us",
+  "bovada",
+  "betonlineag",
+  "mybookieag",
+];
 
-  const spreads = dk.markets?.find((m) => m.key === "spreads");
-  const totals = dk.markets?.find((m) => m.key === "totals");
-  const h2h = dk.markets?.find((m) => m.key === "h2h");
+/**
+ * Find the best bookmaker for a specific market key.
+ * Returns the market object from the first bookmaker that has it with valid data.
+ */
+function findBestMarket(ev, marketKey) {
+  for (const bookKey of BOOKMAKER_PRIORITY) {
+    const bk = (ev.bookmakers || []).find((b) => b.key === bookKey);
+    if (!bk) continue;
+    const market = (bk.markets || []).find((m) => m.key === marketKey);
+    if (market?.outcomes?.length) return market;
+  }
+  return null;
+}
+
+function extractLinesFromEvent(ev) {
+  // ── Spread ──
+  // Use best available bookmaker per market independently
+  const spreadsMarket = findBestMarket(ev, "spreads");
+  const totalsMarket = findBestMarket(ev, "totals");
+  const h2hMarket = findBestMarket(ev, "h2h");
 
   let spreadHome = null;
   let spreadAway = null;
-
-  if (spreads?.outcomes?.length) {
-    const home = spreads.outcomes.find((o) => o.name === ev.home_team);
-    const away = spreads.outcomes.find((o) => o.name === ev.away_team);
+  if (spreadsMarket?.outcomes?.length) {
+    const home = spreadsMarket.outcomes.find((o) => o.name === ev.home_team);
+    const away = spreadsMarket.outcomes.find((o) => o.name === ev.away_team);
     spreadHome = typeof home?.point === "number" ? home.point : null;
     spreadAway = typeof away?.point === "number" ? away.point : null;
+
+    // Derive missing side (they're always mirrors: -1.5 / +1.5)
+    if (spreadHome !== null && spreadAway === null) spreadAway = -spreadHome;
+    if (spreadAway !== null && spreadHome === null) spreadHome = -spreadAway;
   }
 
   let total = null;
-  if (totals?.outcomes?.length) {
-    const over = totals.outcomes.find(
+  if (totalsMarket?.outcomes?.length) {
+    const over = totalsMarket.outcomes.find(
       (o) => String(o.name).toLowerCase() === "over",
     );
     total = typeof over?.point === "number" ? over.point : null;
 
+    // Fallback: take any outcome with a point
     if (total === null) {
-      const any = totals.outcomes.find((o) => typeof o.point === "number");
+      const any = totalsMarket.outcomes.find(
+        (o) => typeof o.point === "number",
+      );
       total = any?.point ?? null;
     }
   }
 
   let moneylineHome = null;
   let moneylineAway = null;
-
-  if (h2h?.outcomes?.length) {
-    const home = h2h.outcomes.find((o) => o.name === ev.home_team);
-    const away = h2h.outcomes.find((o) => o.name === ev.away_team);
-
+  if (h2hMarket?.outcomes?.length) {
+    const home = h2hMarket.outcomes.find((o) => o.name === ev.home_team);
+    const away = h2hMarket.outcomes.find((o) => o.name === ev.away_team);
     moneylineHome = typeof home?.price === "number" ? home.price : null;
     moneylineAway = typeof away?.price === "number" ? away.price : null;
   }
 
+  // Only skip entirely if we have NOTHING at all
   if (
     spreadHome === null &&
     spreadAway === null &&
@@ -143,13 +176,7 @@ function extractLinesFromEvent(ev) {
     return null;
   }
 
-  return {
-    spreadHome,
-    spreadAway,
-    total,
-    moneylineHome,
-    moneylineAway,
-  };
+  return { spreadHome, spreadAway, total, moneylineHome, moneylineAway };
 }
 
 /* ================= FETCH ODDS ================= */
@@ -160,7 +187,8 @@ async function fetchOdds(apiKey, sportKey) {
     {
       params: {
         apiKey,
-        bookmakers: "draftkings",
+        // Fetch multiple bookmakers so we can fall back when DK is missing lines
+        bookmakers: BOOKMAKER_PRIORITY.join(","),
         markets: "h2h,spreads,totals",
         oddsFormat: "american",
         dateFormat: "iso",
@@ -174,7 +202,7 @@ async function fetchOdds(apiKey, sportKey) {
   const used = res.headers["x-requests-used"] ?? res.headers["X-Requests-Used"];
 
   console.log(
-    `[fetchOdds] ${sportKey} | used=${used ?? "?"} remaining=${remaining ?? "?"}`,
+    `[fetchOdds] ${sportKey} | events=${res.data.length} | used=${used ?? "?"} remaining=${remaining ?? "?"}`,
   );
 
   return res.data;
@@ -194,8 +222,10 @@ async function updateLeague(league, sportKey, apiKey) {
 
   for (const ev of events) {
     const lines = extractLinesFromEvent(ev);
+
     if (!lines) {
       skippedNoLines++;
+      console.log(`  [skip-nolines] ${ev.away_team} @ ${ev.home_team}`);
       continue;
     }
 
@@ -204,10 +234,16 @@ async function updateLeague(league, sportKey, apiKey) {
 
     if (!home || !away) {
       skippedNoTeams++;
-      console.log("Team map missing:", league, ev.home_team, ev.away_team);
+      console.log(
+        "  [skip-nomap] Team map missing:",
+        league,
+        ev.home_team,
+        ev.away_team,
+      );
       continue;
     }
 
+    // ── Step 1: match by exact oddsEventId ──
     let snapshot = await db
       .collection("games")
       .where("league", "==", league)
@@ -215,52 +251,134 @@ async function updateLeague(league, sportKey, apiKey) {
       .limit(1)
       .get();
 
+    // ── Step 2: fallback — sport field instead of league (some docs use sport:"MLB") ──
     if (snapshot.empty) {
+      snapshot = await db
+        .collection("games")
+        .where("sport", "==", league)
+        .where("oddsEventId", "==", ev.id)
+        .limit(1)
+        .get();
+    }
+
+    // ── Step 3: fallback — oddsEventId might have been saved with extra suffix (corrupted).
+    //    Match by team abbreviations + same calendar date instead.
+    if (snapshot.empty) {
+      // Build a date window: midnight-to-midnight on the game's commence date (UTC)
+      const gameDate = new Date(ev.commence_time);
+      const dayStart = new Date(
+        Date.UTC(
+          gameDate.getUTCFullYear(),
+          gameDate.getUTCMonth(),
+          gameDate.getUTCDate(),
+        ),
+      );
+      const dayEnd = new Date(
+        Date.UTC(
+          gameDate.getUTCFullYear(),
+          gameDate.getUTCMonth(),
+          gameDate.getUTCDate() + 1,
+        ),
+      );
+
+      // Try with league field
       snapshot = await db
         .collection("games")
         .where("league", "==", league)
         .where("homeTeam", "==", home)
         .where("awayTeam", "==", away)
+        .where("startTime", ">=", dayStart)
+        .where("startTime", "<", dayEnd)
+        .limit(1)
+        .get();
+    }
+
+    // ── Step 4: same but using sport field ──
+    if (snapshot.empty) {
+      const gameDate = new Date(ev.commence_time);
+      const dayStart = new Date(
+        Date.UTC(
+          gameDate.getUTCFullYear(),
+          gameDate.getUTCMonth(),
+          gameDate.getUTCDate(),
+        ),
+      );
+      const dayEnd = new Date(
+        Date.UTC(
+          gameDate.getUTCFullYear(),
+          gameDate.getUTCMonth(),
+          gameDate.getUTCDate() + 1,
+        ),
+      );
+
+      snapshot = await db
+        .collection("games")
+        .where("sport", "==", league)
+        .where("homeTeam", "==", home)
+        .where("awayTeam", "==", away)
+        .where("startTime", ">=", dayStart)
+        .where("startTime", "<", dayEnd)
+        .limit(1)
+        .get();
+    }
+
+    // ── Step 5: last resort — match by matchKey pattern (MLB_YYYYMMDD_HOME_AWAY) ──
+    if (snapshot.empty) {
+      const gameDate = new Date(ev.commence_time);
+      const yyyymmdd = `${gameDate.getUTCFullYear()}${String(gameDate.getUTCMonth() + 1).padStart(2, "0")}${String(gameDate.getUTCDate()).padStart(2, "0")}`;
+      const matchKey = `${league}_${yyyymmdd}_${home}_${away}`;
+
+      snapshot = await db
+        .collection("games")
+        .where("matchKey", "==", matchKey)
         .limit(1)
         .get();
     }
 
     if (snapshot.empty) {
       noMatch++;
-      console.log("No match:", league, home, away, "| oddsEventId:", ev.id);
+      console.log(
+        `  [no-match] ${league} ${away} @ ${home} | oddsEventId: ${ev.id}`,
+      );
       continue;
+    }
+
+    // If the stored oddsEventId is different (corrupted/old), log it so we can track
+    const existingOddsId = snapshot.docs[0].data()?.oddsEventId;
+    if (existingOddsId && existingOddsId !== ev.id) {
+      console.log(
+        `  [fix-id] ${league} ${away} @ ${home} | replacing corrupted oddsEventId: ${existingOddsId} → ${ev.id}`,
+      );
     }
 
     const docRef = snapshot.docs[0].ref;
 
+    // Build the markets payload — only include markets that have data
+    // This prevents overwriting existing good data with nulls
+    const markets = {};
+
+    if (lines.spreadHome !== null || lines.spreadAway !== null) {
+      markets.spread = {
+        homeLine: lines.spreadHome,
+        awayLine: lines.spreadAway,
+      };
+    }
+
+    if (lines.total !== null) {
+      markets.total = { line: lines.total };
+    }
+
+    if (lines.moneylineHome !== null || lines.moneylineAway !== null) {
+      markets.moneyline = {
+        home: lines.moneylineHome,
+        away: lines.moneylineAway,
+      };
+    }
+
     await docRef.set(
       {
         oddsEventId: ev.id,
-        markets: {
-          ...(lines.spreadHome !== null || lines.spreadAway !== null
-            ? {
-                spread: {
-                  homeLine: lines.spreadHome,
-                  awayLine: lines.spreadAway,
-                },
-              }
-            : {}),
-          ...(lines.total !== null
-            ? {
-                total: {
-                  line: lines.total,
-                },
-              }
-            : {}),
-          ...(lines.moneylineHome !== null || lines.moneylineAway !== null
-            ? {
-                moneyline: {
-                  home: lines.moneylineHome,
-                  away: lines.moneylineAway,
-                },
-              }
-            : {}),
-        },
+        markets,
         source: "oddsapi",
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
@@ -269,24 +387,15 @@ async function updateLeague(league, sportKey, apiKey) {
 
     updated++;
     console.log(
-      "Updated:",
-      league,
-      away,
-      "@",
-      home,
-      "| ML:",
-      lines.moneylineAway,
-      lines.moneylineHome,
-      "| SP:",
-      lines.spreadAway,
-      lines.spreadHome,
-      "| OU:",
-      lines.total,
+      `  [ok] ${league} ${away} @ ${home}`,
+      `| ML: ${lines.moneylineAway ?? "—"}/${lines.moneylineHome ?? "—"}`,
+      `| SP: ${lines.spreadAway ?? "—"}/${lines.spreadHome ?? "—"}`,
+      `| OU: ${lines.total ?? "—"}`,
     );
   }
 
   console.log(
-    `=== ${league} done | updated=${updated} noMatch=${noMatch} noLines=${skippedNoLines} noTeams=${skippedNoTeams} ===`,
+    `=== ${league} done | updated=${updated} noMatch=${noMatch} noLines=${skippedNoLines} noTeams=${skippedNoTeams} ===\n`,
   );
 }
 

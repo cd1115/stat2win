@@ -673,7 +673,7 @@ export default function NbaTournamentPage() {
                   Locked
                 </span>
               ) : (
-                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200">
+                <span className="rounded-full border border-green-500/30 bg-green-500/10 px-2 py-0.5 text-xs text-green-400">
                   Open
                 </span>
               )}
