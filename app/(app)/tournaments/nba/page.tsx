@@ -716,7 +716,7 @@ export default function NbaTournamentPage() {
         {/* DraftKings-style layout */}
         <div className="mt-3 space-y-0">
           {/* Column headers */}
-          <div className="grid grid-cols-[1fr_1fr_1fr_1fr] gap-1.5 mb-1.5 px-1">
+          <div className="grid grid-cols-[1.2fr_1fr_1.3fr_1fr] gap-1.5 mb-1.5 px-1">
             <div />
             {showSpread ? <div className="text-center text-[10px] font-semibold uppercase tracking-wider text-white/40">Spread</div> : null}
             {showOU ? <div className="text-center text-[10px] font-semibold uppercase tracking-wider text-white/40">Total</div> : null}
@@ -724,10 +724,10 @@ export default function NbaTournamentPage() {
           </div>
 
           {/* Away row */}
-          <div className="grid grid-cols-[1fr_1fr_1fr_1fr] gap-1.5 items-center">
-            <div className="flex items-center gap-2 min-w-0">
-              <TeamLogo code={awayAbbr} size={32} />
-              <span className="truncate text-sm font-semibold text-white">{awayAbbr}</span>
+          <div className="grid grid-cols-[1.2fr_1fr_1.3fr_1fr] gap-1.5 items-center">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <TeamLogo code={awayAbbr} size={28} />
+              <span className="text-sm font-semibold text-white">{awayAbbr}</span>
             </div>
 
             {showSpread ? (
@@ -746,7 +746,7 @@ export default function NbaTournamentPage() {
                 onClick={() => savePick({ g, market: "ou", pick: "over", line: typeof ou.line === "number" ? ou.line : null, selection: "OVER" })}
                 className={pickCell((pickOU as any)?.pick === "over", !user?.uid || closed || !hasTotalLine || !gameKey || isSavingOU)}
               >
-                <div className="text-center text-sm font-bold">O {ou.line ?? "—"}</div>
+                <div className="text-center text-xs font-bold whitespace-nowrap">O {ou.line ?? "—"}</div>
               </button>
             ) : null}
 
@@ -762,10 +762,10 @@ export default function NbaTournamentPage() {
           </div>
 
           {/* Home row */}
-          <div className="grid grid-cols-[1fr_1fr_1fr_1fr] gap-1.5 items-center mt-1.5">
-            <div className="flex items-center gap-2 min-w-0">
-              <TeamLogo code={homeAbbr} size={32} />
-              <span className="truncate text-sm font-semibold text-white">{homeAbbr}</span>
+          <div className="grid grid-cols-[1.2fr_1fr_1.3fr_1fr] gap-1.5 items-center mt-1.5">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <TeamLogo code={homeAbbr} size={28} />
+              <span className="text-sm font-semibold text-white">{homeAbbr}</span>
             </div>
 
             {showSpread ? (
@@ -784,7 +784,7 @@ export default function NbaTournamentPage() {
                 onClick={() => savePick({ g, market: "ou", pick: "under", line: typeof ou.line === "number" ? ou.line : null, selection: "UNDER" })}
                 className={pickCell((pickOU as any)?.pick === "under", !user?.uid || closed || !hasTotalLine || !gameKey || isSavingOU)}
               >
-                <div className="text-center text-sm font-bold">U {ou.line ?? "—"}</div>
+                <div className="text-center text-xs font-bold whitespace-nowrap">U {ou.line ?? "—"}</div>
               </button>
             ) : null}
 
