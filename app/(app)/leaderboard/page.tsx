@@ -139,7 +139,7 @@ export default function LeaderboardHubPage() {
                       {board.tag}
                     </span>
                   </div>
-                  <p className="text-sm text-white/40 truncate">{board.description}</p>
+                  <p className="text-sm text-white/40 line-clamp-2">{board.description}</p>
                   <p className="mt-1.5 text-[11px] text-white/20">
                     {board.id === "daily"
                       ? dayLabel

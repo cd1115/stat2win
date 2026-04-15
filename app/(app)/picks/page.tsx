@@ -1391,7 +1391,7 @@ export default function PicksPage() {
                                             Your pick
                                           </div>
                                           <div className={[
-                                            "text-base font-black truncate",
+                                            "text-base font-black break-words",
                                             row.outcome === "win"  ? "text-emerald-300"
                                             : row.outcome === "loss" ? "text-red-300"
                                             : row.outcome === "push" ? "text-yellow-300"
@@ -1536,7 +1536,7 @@ export default function PicksPage() {
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         placeholder="Search team, sport, or pick..."
-                        className="w-80 max-w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white placeholder:text-white/40 outline-none"
+                        className="w-full md:w-80 rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white placeholder:text-white/40 outline-none"
                       />
                       <button
                         onClick={refresh}
@@ -1689,7 +1689,7 @@ export default function PicksPage() {
                                       <div className="min-w-0">
                                         <div className="text-xs text-white/50">Your pick</div>
                                         <div className={[
-                                          "text-base font-black truncate",
+                                          "text-base font-black break-words",
                                           tone === "win"  ? "text-emerald-300"
                                           : tone === "loss" ? "text-red-300"
                                           : tone === "push" ? "text-yellow-300"
