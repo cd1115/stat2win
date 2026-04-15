@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getApp } from "firebase/app";
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
+
+import { onAuthStateChanged } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -140,7 +142,35 @@ function PointsBar({
 
 export default function StoreAppPage() {
   const router = useRouter();
-  const { isAuthed, plan, points, loading } = useUserEntitlements();
+  const {
+    isAuthed,
+    plan,
+    points: entitlementPoints,
+    loading,
+  } = useUserEntitlements();
+
+  // Live rewardPoints directly from users/{uid} — matches navbar
+  const [liveRp, setLiveRp] = useState<number | null>(null);
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      if (!u?.uid) {
+        setLiveRp(null);
+        return;
+      }
+      const unsub2 = onSnapshot(
+        doc(db, "users", u.uid),
+        (snap) => {
+          const rp = snap.data()?.rewardPoints;
+          setLiveRp(typeof rp === "number" ? rp : null);
+        },
+        () => {},
+      );
+      return () => unsub2();
+    });
+    return () => unsub();
+  }, []);
+
+  const points = liveRp ?? entitlementPoints;
 
   const [cat, setCat] = useState<StoreCategory>("trending");
   const [redeem, setRedeem] = useState<RedeemState>({ status: "idle" });
@@ -242,7 +272,6 @@ export default function StoreAppPage() {
           <div className="flex items-center gap-2 shrink-0">
             {!isPremium && (
               <button
-               
                 onClick={onUpgrade}
                 className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-sm font-bold text-blue-300 hover:bg-blue-500/20 transition"
               >

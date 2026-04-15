@@ -26,12 +26,12 @@ export default function Sidebar({
     { href: "/overview", label: "Overview" },
     { href: "/dashboard", label: "Dashboard" },
     { href: "/tournaments", label: "Tournaments" },
-    { href: "/picks", label: "My Picks" },
     { href: "/leaderboard", label: "Leaderboard" },
-
-    { href: "/store", label: "Store" },
+    { href: "/picks", label: "My Picks" },
     { href: "/redeems", label: "My Redeems" },
-     { href: "/subscription", label: "Subscription" },
+    { href: "/store", label: "Store" },
+
+    { href: "/subscription", label: "Subscription" },
     { href: "/settings", label: "Settings" },
   ];
 
