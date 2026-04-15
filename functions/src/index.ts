@@ -6218,13 +6218,27 @@ function parseProps(
   }
 
   const result: PlayerProp[] = [];
-  const usedPitcherTeams = new Set<string>();
-  const usedBatterTeams = new Set<string>();
 
-  // Pick 1 pitcher per team
+  // Pick 1 pitcher per team.
+  // When the API provides team info (e.g. "HOU - Colton Gordon") use resolveTeam().
+  // When team is empty (API doesn't include it), alternate: 1st pitcher → homeTeam, 2nd → awayTeam.
+  const usedPitcherTeams = new Set<string>();
+  const pitcherFallback = [homeTeam, awayTeam];
+  let pitcherFallbackIdx = 0;
+
   for (const [pName, prop] of pitcherProps.entries()) {
-    const team = resolveTeam(prop.team, homeTeam, awayTeam);
-    if (usedPitcherTeams.has(team)) continue;
+    let team: string;
+    if (prop.team) {
+      team = resolveTeam(prop.team, homeTeam, awayTeam);
+    } else {
+      team = pitcherFallback[pitcherFallbackIdx] ?? homeTeam;
+    }
+    // If team already taken, try the other one
+    if (usedPitcherTeams.has(team)) {
+      const other = team === homeTeam ? awayTeam : homeTeam;
+      if (usedPitcherTeams.has(other)) continue;
+      team = other;
+    }
     result.push({
       playerId: nameToId(pName),
       playerName: pName,
@@ -6236,13 +6250,27 @@ function parseProps(
       underOdds: prop.underOdds,
     });
     usedPitcherTeams.add(team);
+    pitcherFallbackIdx++;
     if (usedPitcherTeams.size >= 2) break;
   }
 
-  // Pick 1 batter per team (pick the one with the most interesting line)
+  // Pick 1 batter per team — same alternating strategy
+  const usedBatterTeams = new Set<string>();
+  const batterFallback = [homeTeam, awayTeam];
+  let batterFallbackIdx = 0;
+
   for (const [pName, prop] of batterProps.entries()) {
-    const team = resolveTeam(prop.team, homeTeam, awayTeam);
-    if (usedBatterTeams.has(team)) continue;
+    let team: string;
+    if (prop.team) {
+      team = resolveTeam(prop.team, homeTeam, awayTeam);
+    } else {
+      team = batterFallback[batterFallbackIdx] ?? homeTeam;
+    }
+    if (usedBatterTeams.has(team)) {
+      const other = team === homeTeam ? awayTeam : homeTeam;
+      if (usedBatterTeams.has(other)) continue;
+      team = other;
+    }
     result.push({
       playerId: nameToId(pName),
       playerName: pName,
@@ -6254,6 +6282,7 @@ function parseProps(
       underOdds: prop.underOdds,
     });
     usedBatterTeams.add(team);
+    batterFallbackIdx++;
     if (usedBatterTeams.size >= 2) break;
   }
 
