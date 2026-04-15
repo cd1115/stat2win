@@ -5,6 +5,12 @@ const withPWA = require("next-pwa")({
   skipWaiting: true,
 });
 
-module.exports = withPWA({
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   reactStrictMode: true,
-});
+  experimental: {
+    turbo: {},
+  },
+};
+
+module.exports = withPWA(nextConfig);
