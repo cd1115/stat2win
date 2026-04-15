@@ -713,133 +713,91 @@ export default function NbaTournamentPage() {
           </div>
         </div>
 
-        {/* Botones */}
-       <div className="grid gap-3 
-  grid-cols-1 
-  md:grid-cols-[1fr_180px_180px_160px]">
-          <div />
-          {showSpread ? <div className="text-xs font-semibold text-white/60">Handicap</div> : null}
-          {showOU ? <div className="text-xs font-semibold text-white/60">Total</div> : null}
-          {showMoneyline ? <div className="text-xs font-semibold text-white/60">Moneyline</div> : null}
+        {/* DraftKings-style layout */}
+        <div className="mt-3 space-y-0">
+          {/* Column headers */}
+          <div className="grid grid-cols-[1fr_1fr_1fr_1fr] gap-1.5 mb-1.5 px-1">
+            <div />
+            {showSpread ? <div className="text-center text-[10px] font-semibold uppercase tracking-wider text-white/40">Spread</div> : null}
+            {showOU ? <div className="text-center text-[10px] font-semibold uppercase tracking-wider text-white/40">Total</div> : null}
+            {showMoneyline ? <div className="text-center text-[10px] font-semibold uppercase tracking-wider text-white/40">Moneyline</div> : null}
+          </div>
 
-       <div className="flex items-center gap-3 md:gap-3">
-  <TeamLogo code={awayAbbr} />
-  <div className="min-w-0">
-    <div className="truncate text-base font-semibold">{g.awayTeam}</div>
-  </div>
-</div>
-
-          {/* AWAY SPREAD */}
-          <button
-            disabled={!user?.uid || closed || !hasSpreadLine || !gameKey || isSavingSpread}
-            onClick={() =>
-              savePick({
-                g,
-                market: "spread",
-                pick: "away",
-                line: typeof sp.awayLine === "number" ? sp.awayLine : null,
-                selection: "AWAY",
-              })
-            }
-            className={pickCell((pickSP as any)?.pick === "away", !user?.uid || closed || !hasSpreadLine || !gameKey || isSavingSpread)}
-          >
-            <div className="text-base font-semibold">
-              {g.awayTeam} {showLine(sp.awayLine)}
+          {/* Away row */}
+          <div className="grid grid-cols-[1fr_1fr_1fr_1fr] gap-1.5 items-center">
+            <div className="flex items-center gap-2 min-w-0">
+              <TeamLogo code={awayAbbr} size={32} />
+              <span className="truncate text-sm font-semibold text-white">{awayAbbr}</span>
             </div>
-          </button>
 
-          {/* OVER */}
-          <button
-            disabled={!user?.uid || closed || !hasTotalLine || !gameKey || isSavingOU}
-            onClick={() =>
-              savePick({
-                g,
-                market: "ou",
-                pick: "over",
-                line: typeof ou.line === "number" ? ou.line : null,
-                selection: "OVER",
-              })
-            }
-            className={pickCell((pickOU as any)?.pick === "over", !user?.uid || closed || !hasTotalLine || !gameKey || isSavingOU)}
-          >
-            <div className="text-base font-semibold">O {ou.line ?? "—"}</div>
-          </button>
+            {showSpread ? (
+              <button
+                disabled={!user?.uid || closed || !hasSpreadLine || !gameKey || isSavingSpread}
+                onClick={() => savePick({ g, market: "spread", pick: "away", line: typeof sp.awayLine === "number" ? sp.awayLine : null, selection: "AWAY" })}
+                className={pickCell((pickSP as any)?.pick === "away", !user?.uid || closed || !hasSpreadLine || !gameKey || isSavingSpread)}
+              >
+                <div className="text-center text-sm font-bold">{showLine(sp.awayLine)}</div>
+              </button>
+            ) : null}
 
-          {/* AWAY ML */}
-          <button
-            disabled={!user?.uid || closed || !gameKey || isSavingML}
-            onClick={() =>
-              savePick({
-                g,
-                market: "moneyline",
-                pick: "away",
-                line: null,
-                selection: "AWAY",
-              })
-            }
-            className={pickCell(mlAwayActive, !user?.uid || closed || !gameKey || isSavingML)}
-          >
-            <div className="text-base font-semibold">{g.awayTeam}</div>
-          </button>
+            {showOU ? (
+              <button
+                disabled={!user?.uid || closed || !hasTotalLine || !gameKey || isSavingOU}
+                onClick={() => savePick({ g, market: "ou", pick: "over", line: typeof ou.line === "number" ? ou.line : null, selection: "OVER" })}
+                className={pickCell((pickOU as any)?.pick === "over", !user?.uid || closed || !hasTotalLine || !gameKey || isSavingOU)}
+              >
+                <div className="text-center text-sm font-bold">O {ou.line ?? "—"}</div>
+              </button>
+            ) : null}
 
-         <div className="flex items-center gap-3 md:gap-3">
-  <TeamLogo code={homeAbbr} />
-  <div className="min-w-0">
-    <div className="truncate text-base font-semibold">{g.homeTeam}</div>
-  </div>
-</div>
-          {/* HOME SPREAD */}
-          <button
-            disabled={!user?.uid || closed || !hasSpreadLine || !gameKey || isSavingSpread}
-            onClick={() =>
-              savePick({
-                g,
-                market: "spread",
-                pick: "home",
-                line: typeof sp.homeLine === "number" ? sp.homeLine : null,
-                selection: "HOME",
-              })
-            }
-            className={pickCell((pickSP as any)?.pick === "home", !user?.uid || closed || !hasSpreadLine || !gameKey || isSavingSpread)}
-          >
-            <div className="text-base font-semibold">
-              {g.homeTeam} {showLine(sp.homeLine)}
+            {showMoneyline ? (
+              <button
+                disabled={!user?.uid || closed || !gameKey || isSavingML}
+                onClick={() => savePick({ g, market: "moneyline", pick: "away", line: null, selection: "AWAY" })}
+                className={pickCell(mlAwayActive, !user?.uid || closed || !gameKey || isSavingML)}
+              >
+                <div className="text-center text-sm font-bold">{awayAbbr}</div>
+              </button>
+            ) : null}
+          </div>
+
+          {/* Home row */}
+          <div className="grid grid-cols-[1fr_1fr_1fr_1fr] gap-1.5 items-center mt-1.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <TeamLogo code={homeAbbr} size={32} />
+              <span className="truncate text-sm font-semibold text-white">{homeAbbr}</span>
             </div>
-          </button>
 
-          {/* UNDER */}
-          <button
-            disabled={!user?.uid || closed || !hasTotalLine || !gameKey || isSavingOU}
-            onClick={() =>
-              savePick({
-                g,
-                market: "ou",
-                pick: "under",
-                line: typeof ou.line === "number" ? ou.line : null,
-                selection: "UNDER",
-              })
-            }
-            className={pickCell((pickOU as any)?.pick === "under", !user?.uid || closed || !hasTotalLine || !gameKey || isSavingOU)}
-          >
-            <div className="text-base font-semibold">U {ou.line ?? "—"}</div>
-          </button>
+            {showSpread ? (
+              <button
+                disabled={!user?.uid || closed || !hasSpreadLine || !gameKey || isSavingSpread}
+                onClick={() => savePick({ g, market: "spread", pick: "home", line: typeof sp.homeLine === "number" ? sp.homeLine : null, selection: "HOME" })}
+                className={pickCell((pickSP as any)?.pick === "home", !user?.uid || closed || !hasSpreadLine || !gameKey || isSavingSpread)}
+              >
+                <div className="text-center text-sm font-bold">{showLine(sp.homeLine)}</div>
+              </button>
+            ) : null}
 
-          {/* HOME ML */}
-          <button
-            disabled={!user?.uid || closed || !gameKey || isSavingML}
-            onClick={() =>
-              savePick({
-                g,
-                market: "moneyline",
-                pick: "home",
-                line: null,
-                selection: "HOME",
-              })
-            }
-            className={pickCell(mlHomeActive, !user?.uid || closed || !gameKey || isSavingML)}
-          >
-            <div className="text-base font-semibold">{g.homeTeam}</div>
-          </button>
+            {showOU ? (
+              <button
+                disabled={!user?.uid || closed || !hasTotalLine || !gameKey || isSavingOU}
+                onClick={() => savePick({ g, market: "ou", pick: "under", line: typeof ou.line === "number" ? ou.line : null, selection: "UNDER" })}
+                className={pickCell((pickOU as any)?.pick === "under", !user?.uid || closed || !hasTotalLine || !gameKey || isSavingOU)}
+              >
+                <div className="text-center text-sm font-bold">U {ou.line ?? "—"}</div>
+              </button>
+            ) : null}
+
+            {showMoneyline ? (
+              <button
+                disabled={!user?.uid || closed || !gameKey || isSavingML}
+                onClick={() => savePick({ g, market: "moneyline", pick: "home", line: null, selection: "HOME" })}
+                className={pickCell(mlHomeActive, !user?.uid || closed || !gameKey || isSavingML)}
+              >
+                <div className="text-center text-sm font-bold">{homeAbbr}</div>
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {(!hasSpreadLine || !hasTotalLine) && (

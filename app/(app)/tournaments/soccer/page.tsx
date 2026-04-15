@@ -417,30 +417,7 @@ if (statusFilter !== "all" && g.status !== statusFilter) return false;
                               </div>
                             )}
 
-                            {/* Spread */}
-                            {showSP && (
-                              <div className="rounded-xl border border-white/6 bg-black/20 p-3">
-                                <div className="text-[10px] font-semibold uppercase tracking-widest text-white/35 mb-2.5">Spread</div>
-                                {homeLine !== null || awayLine !== null ? (
-                                  <div className="grid grid-cols-2 gap-1.5">
-                                    {([
-                                      { side: "away" as SoccerSide, label: away, line: awayLine },
-                                      { side: "home" as SoccerSide, label: home, line: homeLine },
-                                    ]).map(({ side, label, line }) => (
-                                      <button key={side}
-                                        disabled={closed || !canPick || busy("spread") || (hasML && spPick?.pick !== side)}
-                                        onClick={() => handlePick(g, "spread", side, line)}
-                                        className={pickCell(spPick?.pick === side, closed || !canPick || (hasML && spPick?.pick !== side))}>
-                                        <div className="truncate text-xs leading-tight">{label}</div>
-                                        <div className="text-[11px] text-white/50 mt-0.5">{showLine(line)}</div>
-                                      </button>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <div className="text-xs text-white/30 text-center py-3">No line yet</div>
-                                )}
-                              </div>
-                            )}
+                          
 
                             {/* Over/Under */}
                             {showOU && (
