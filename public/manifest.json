@@ -1,17 +1,32 @@
+
+
 {
   "name": "Stat2Win",
   "short_name": "Stat2Win",
-  "description": "Prove you know your sports",
+  "description": "Prove you know your sports. Pick winners, earn points, climb the leaderboard.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#000000",
-  "theme_color": "#000000",
   "orientation": "portrait",
+  "background_color": "#070912",
+  "theme_color": "#070912",
   "icons": [
     {
-      "src": "/favicon.ico",
-      "sizes": "64x64",
-      "type": "image/x-icon"
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "apple touch icon"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ]
 }
