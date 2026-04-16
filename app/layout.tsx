@@ -12,8 +12,8 @@ export const metadata: Metadata = {
     title: "Stat2Win",
   },
   icons: {
-    apple: "/icon-512.png",
-    icon: "/icon-512.png",
+    apple: '/apple-touch-icon.png',
+    icon: '/apple-touch-icon.png',
   },
 };
 
