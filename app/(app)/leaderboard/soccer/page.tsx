@@ -212,6 +212,110 @@ export default function SoccerLeaderboardPage() {
             ))}
           </div>
 
+          {/* ── PODIUM TOP 3 ── */}
+          {!loading && rows.length >= 1 && (
+            <div className="mb-5 rounded-2xl border border-white/10 bg-black/25 overflow-hidden">
+              <div className="flex items-center justify-between px-4 pt-4 pb-2">
+                <div className="text-xs font-bold uppercase tracking-widest text-white/30">Top 3 esta semana</div>
+                <div className="text-xs text-white/20">{weekId}</div>
+              </div>
+              <div className="flex items-end justify-center gap-3 px-4 pb-0 pt-2">
+
+                {/* #2 Silver */}
+                {rows[1] && (() => {
+                  const r2 = rows[1]; const rec2 = recordOf(r2, market);
+                  const pts2 = pointsOf(r2, market); const wr2 = winRate(rec2.w??0, rec2.l??0, rec2.p??0);
+                  const name2 = (r2.displayName || r2.username || "User").trim();
+                  const isMe2 = user?.uid === r2.uid;
+                  return (
+                    <div className="flex flex-col items-center gap-1.5 flex-1">
+                      <div className={`flex h-11 w-11 items-center justify-center rounded-2xl border-2 text-sm font-black ${isMe2 ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-300" : "border-slate-400/40 bg-slate-400/10 text-slate-300"}`}>{initials(name2)}</div>
+                      <div className="text-center">
+                        <div className={`text-xs font-bold truncate max-w-[72px] ${isMe2 ? "text-emerald-300" : "text-white/80"}`}>{name2.split(" ")[0]}</div>
+                        <div className="text-[10px] text-white/40">{pts2.toLocaleString()} pts</div>
+                        <div className="text-[11px] font-black text-slate-300 mt-0.5">{wr2}%</div>
+                        <div className="w-12 h-1 rounded-full bg-white/10 overflow-hidden mx-auto mt-0.5">
+                          <div className="h-full rounded-full bg-slate-400/60" style={{ width: `${wr2}%` }} />
+                        </div>
+                        <div className="text-[9px] text-white/30 mt-1">
+                          <span className="text-emerald-400/70">{rec2.w??0}W</span><span className="text-white/20"> · </span>
+                          <span className="text-red-400/60">{rec2.l??0}L</span><span className="text-white/20"> · </span>
+                          <span className="text-yellow-400/50">{rec2.p??0}P</span>
+                        </div>
+                      </div>
+                      <div className="w-full h-16 rounded-t-xl bg-gradient-to-t from-slate-500/30 to-slate-400/10 border border-slate-400/20 border-b-0 flex items-center justify-center">
+                        <span className="text-xl">🥈</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* #1 Gold — tallest */}
+                {rows[0] && (() => {
+                  const r1 = rows[0]; const rec1 = recordOf(r1, market);
+                  const pts1 = pointsOf(r1, market); const wr1 = winRate(rec1.w??0, rec1.l??0, rec1.p??0);
+                  const name1 = (r1.displayName || r1.username || "User").trim();
+                  const isMe1 = user?.uid === r1.uid;
+                  return (
+                    <div className="flex flex-col items-center gap-1.5 flex-1">
+                      <div className="text-sm">👑</div>
+                      <div className={`flex h-14 w-14 items-center justify-center rounded-2xl border-2 text-base font-black ${isMe1 ? "border-emerald-400/60 bg-emerald-500/20 text-emerald-300" : "border-amber-400/60 bg-amber-400/15 text-amber-300"}`}>{initials(name1)}</div>
+                      <div className="text-center">
+                        <div className={`text-sm font-black truncate max-w-[80px] ${isMe1 ? "text-emerald-300" : "text-white"}`}>{name1.split(" ")[0]}</div>
+                        <div className="text-[11px] font-bold text-amber-300">{pts1.toLocaleString()} pts</div>
+                        <div className="text-[12px] font-black text-amber-300 mt-0.5">{wr1}%</div>
+                        <div className="w-14 h-1.5 rounded-full bg-white/10 overflow-hidden mx-auto mt-0.5">
+                          <div className="h-full rounded-full bg-amber-400/70" style={{ width: `${wr1}%` }} />
+                        </div>
+                        <div className="text-[9px] text-white/40 mt-1">
+                          <span className="text-emerald-400/80">{rec1.w??0}W</span><span className="text-white/20"> · </span>
+                          <span className="text-red-400/60">{rec1.l??0}L</span><span className="text-white/20"> · </span>
+                          <span className="text-yellow-400/60">{rec1.p??0}P</span>
+                        </div>
+                      </div>
+                      <div className="w-full h-24 rounded-t-xl bg-gradient-to-t from-amber-500/30 to-amber-400/10 border border-amber-400/25 border-b-0 flex items-center justify-center">
+                        <span className="text-2xl">🥇</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* #3 Bronze */}
+                {rows[2] && (() => {
+                  const r3 = rows[2]; const rec3 = recordOf(r3, market);
+                  const pts3 = pointsOf(r3, market); const wr3 = winRate(rec3.w??0, rec3.l??0, rec3.p??0);
+                  const name3 = (r3.displayName || r3.username || "User").trim();
+                  const isMe3 = user?.uid === r3.uid;
+                  return (
+                    <div className="flex flex-col items-center gap-1.5 flex-1">
+                      <div className={`flex h-10 w-10 items-center justify-center rounded-2xl border-2 text-xs font-black ${isMe3 ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-300" : "border-orange-400/40 bg-orange-400/10 text-orange-300"}`}>{initials(name3)}</div>
+                      <div className="text-center">
+                        <div className={`text-xs font-bold truncate max-w-[64px] ${isMe3 ? "text-emerald-300" : "text-white/70"}`}>{name3.split(" ")[0]}</div>
+                        <div className="text-[10px] text-white/40">{pts3.toLocaleString()} pts</div>
+                        <div className="text-[10px] font-black text-orange-300 mt-0.5">{wr3}%</div>
+                        <div className="w-10 h-1 rounded-full bg-white/10 overflow-hidden mx-auto mt-0.5">
+                          <div className="h-full rounded-full bg-orange-400/60" style={{ width: `${wr3}%` }} />
+                        </div>
+                        <div className="text-[9px] text-white/30 mt-1">
+                          <span className="text-emerald-400/70">{rec3.w??0}W</span><span className="text-white/20"> · </span>
+                          <span className="text-red-400/60">{rec3.l??0}L</span><span className="text-white/20"> · </span>
+                          <span className="text-yellow-400/50">{rec3.p??0}P</span>
+                        </div>
+                      </div>
+                      <div className="w-full h-10 rounded-t-xl bg-gradient-to-t from-orange-500/20 to-orange-400/8 border border-orange-400/20 border-b-0 flex items-center justify-center">
+                        <span className="text-lg">🥉</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+              <div className="h-px bg-gradient-to-r from-transparent via-white/8 to-transparent mx-4" />
+              <div className="px-4 py-2 text-[10px] text-white/18 text-center tracking-widest uppercase">
+                Win Rate · W · L · P · Puntos
+              </div>
+            </div>
+          )}
+
           {/* Table */}
           <div className="rounded-2xl border border-white/10 bg-black/30 overflow-hidden">
             <div className="grid grid-cols-[56px_1fr_80px_120px_100px] gap-3 border-b border-white/10 bg-black/30 px-4 py-3 text-xs font-semibold text-white/40 uppercase tracking-wider">

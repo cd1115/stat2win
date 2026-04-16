@@ -2267,7 +2267,7 @@ function applyLeaderboardForPickTx(
   const sportStr = String(pick.sport ?? pick.league ?? "NBA").toUpperCase();
 
   if (!uid || !weekId) return;
-  if (sportStr !== "NBA" && sportStr !== "MLB") return;
+  if (sportStr !== "NBA" && sportStr !== "MLB" && sportStr !== "SOCCER") return;
 
   const sport = sportStr as Sport;
   const market = String(pick.market ?? "").toLowerCase();
@@ -2569,7 +2569,7 @@ export const onGameWriteResolveDailyPicks = onDocumentWritten(
     const game = after.data() as any;
 
     const sportStr = String(game.sport ?? game.league ?? "NBA").toUpperCase();
-    if (sportStr !== "NBA" && sportStr !== "MLB") return;
+    if (sportStr !== "NBA" && sportStr !== "MLB" && sportStr !== "SOCCER") return;
     const sport = sportStr as Sport;
 
     const status = String(game.status ?? "").toLowerCase();
@@ -4385,7 +4385,7 @@ export const adminRescoreGame = onCall({ cors: true }, async (req) => {
     const weekId = String(req.data?.weekId ?? "").trim();
     const gameId = String(req.data?.gameId ?? "").trim();
 
-    if (sportRaw !== "NBA" && sportRaw !== "MLB") {
+    if (sportRaw !== "NBA" && sportRaw !== "MLB" && sportRaw !== "SOCCER") {
       throw new HttpsError("invalid-argument", "Invalid sport.");
     }
 
@@ -7347,4 +7347,72 @@ export const adminFinalizeMLBPropsRewards = onCall({ cors: true }, async (req) =
   const force = req.data?.force === true;
   const result = await runFinalizeMLBPropsRewards(weekId, force);
   return result;
+});
+// ─── Admin: Rescore ALL Soccer picks for a week (retroactive fix) ─────────────
+export const adminRescoreSoccerWeek = onCall({ cors: true }, async (req) => {
+  await requireAdmin(req);
+
+  const weekId = String(req.data?.weekId ?? "").trim();
+  if (!/^\d{4}-W\d{2}$/.test(weekId)) {
+    throw new HttpsError("invalid-argument", 'weekId inválido. Usa formato "2026-W15".');
+  }
+
+  // 1. Get all FINAL soccer games for the week
+  const gamesSnap = await db
+    .collection("games")
+    .where("sport", "==", "SOCCER")
+    .where("weekId", "==", weekId)
+    .where("status", "==", "final")
+    .get();
+
+  if (gamesSnap.empty) {
+    return { ok: true, gamesProcessed: 0, picksRescored: 0 };
+  }
+
+  let gamesProcessed = 0;
+  let picksRescored = 0;
+
+  for (const gameDoc of gamesSnap.docs) {
+    const game = gameDoc.data() as any;
+    const gameId = String(game.gameId ?? "").trim();
+    if (!gameId) continue;
+
+    // Get all picks for this game
+    const picksSnap = await db
+      .collection("picks")
+      .where("sport", "==", "SOCCER")
+      .where("weekId", "==", weekId)
+      .where("gameId", "==", gameId)
+      .get();
+
+    if (picksSnap.empty) continue;
+
+    await db.runTransaction(async (tx) => {
+      for (const pickDoc of picksSnap.docs) {
+        const pick = pickDoc.data() as any;
+        const result = computePickResult(game, pick);
+        const points = pointsForResult(result);
+
+        const alreadyApplied = pick.leaderboardApplied === true;
+
+        tx.set(pickDoc.ref, {
+          result,
+          pointsAwarded: points,
+          leaderboardApplied: true,
+          resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+        // Only apply to leaderboard if not already applied
+        if (!alreadyApplied) {
+          applyLeaderboardForPickTx(tx, pick, result as any, points);
+          picksRescored++;
+        }
+      }
+    });
+
+    gamesProcessed++;
+  }
+
+  return { ok: true, weekId, gamesProcessed, picksRescored };
 });
