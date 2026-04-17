@@ -9,6 +9,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { getApp } from "firebase/app";
 
 type Market = "ALL" | "ML" | "SPREAD" | "OU";
+type Sport = "NBA" | "MLB";
 
 type LeaderRow = {
   id: string; uid: string; username?: string; displayName?: string;
@@ -18,11 +19,11 @@ type LeaderRow = {
   pointsOU?: number; winsOU?: number; lossesOU?: number; pushesOU?: number; picksOU?: number;
 };
 
-const SPORT = "SOCCER";
+const SPORT: Sport = "MLB";
 
 function initials(name?: string) {
   const s = (name ?? "?").trim();
-  return s.split(/\s+/).slice(0, 2).map(p => p[0]?.toUpperCase() ?? "").join("") || "?";
+  return s.split(/\s+/).slice(0,2).map(p=>p[0]?.toUpperCase()??"").join("") || "?";
 }
 
 function medal(rank: number) {
@@ -47,26 +48,26 @@ function pointsOf(row: LeaderRow, market: Market) {
   return row.points ?? 0;
 }
 
-function winRate(w = 0, l = 0, p = 0) {
+function winRate(w=0, l=0, p=0) {
   const total = w + l + p;
   return total > 0 ? Math.round((w / total) * 100) : 0;
 }
 
 const MARKET_CONFIG: Record<Market, { label: string; short: string; color: string; activeBg: string; border: string }> = {
-  ALL:    { label: "All markets", short: "ALL", color: "text-white",       activeBg: "bg-white/10",       border: "border-white/20" },
-  ML:     { label: "Moneyline",   short: "ML",  color: "text-emerald-300", activeBg: "bg-emerald-500/15", border: "border-emerald-400/30" },
-  SPREAD: { label: "Spread",      short: "SP",  color: "text-violet-300",  activeBg: "bg-violet-500/15",  border: "border-violet-400/30" },
-  OU:     { label: "O/U",         short: "O/U", color: "text-amber-300",   activeBg: "bg-amber-500/15",   border: "border-amber-400/30" },
+  ALL:    { label: "All markets", short: "ALL", color: "text-white",        activeBg: "bg-white/10",        border: "border-white/20" },
+  ML:     { label: "Moneyline",   short: "ML",  color: "text-blue-300",     activeBg: "bg-blue-500/15",     border: "border-blue-400/30" },
+  SPREAD: { label: "Spread",      short: "SP",  color: "text-violet-300",   activeBg: "bg-violet-500/15",   border: "border-violet-400/30" },
+  OU:     { label: "O/U",         short: "O/U", color: "text-amber-300",    activeBg: "bg-amber-500/15",    border: "border-amber-400/30" },
 };
 
-export default function SoccerLeaderboardPage() {
+export default function LeaderboardPage() {
   const { user } = useAuth();
   const [weekOffset, setWeekOffset] = useState(0);
-  const [market, setMarket]         = useState<Market>("ALL");
-  const [qText, setQText]           = useState("");
-  const [rowsRaw, setRowsRaw]       = useState<LeaderRow[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [err, setErr]               = useState<string | null>(null);
+  const [market, setMarket] = useState<Market>("ALL");
+  const [qText, setQText] = useState("");
+  const [rowsRaw, setRowsRaw] = useState<LeaderRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
   const weekDate = useMemo(() => {
     const d = new Date(); d.setDate(d.getDate() + weekOffset * 7); return d;
@@ -99,7 +100,7 @@ export default function SoccerLeaderboardPage() {
 
   const rows = useMemo(() => {
     const t = qText.trim().toLowerCase();
-    return !t ? rowsRaw : rowsRaw.filter(r => (r.displayName || r.username || "").toLowerCase().includes(t));
+    return !t ? rowsRaw : rowsRaw.filter(r => (r.displayName||r.username||"").toLowerCase().includes(t));
   }, [rowsRaw, qText]);
 
   const myIndex = user?.uid ? rows.findIndex(r => r.uid === user.uid) : -1;
@@ -107,7 +108,7 @@ export default function SoccerLeaderboardPage() {
   const myRow   = myIndex >= 0 ? rows[myIndex] : null;
   const myRec   = recordOf(myRow, market);
   const myPts   = myRow ? pointsOf(myRow, market) : null;
-  const myWR    = myRow ? winRate(myRec.w ?? 0, myRec.l ?? 0, myRec.p ?? 0) : null;
+  const myWR    = myRow ? winRate(myRec.w??0, myRec.l??0, myRec.p??0) : null;
   const mc      = MARKET_CONFIG[market];
 
   return (
@@ -123,24 +124,21 @@ export default function SoccerLeaderboardPage() {
                 <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-white/60">
                   Week {weekId}
                 </span>
-                <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300">
-                  ⚽ Soccer
+                <span className="rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 text-xs font-semibold text-blue-300">
+                  {SPORT}
                 </span>
                 <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${mc.border} ${mc.activeBg} ${mc.color}`}>
                   {mc.label}
                 </span>
               </div>
               <p className="text-white/50 text-sm">
-                EPL · La Liga · Bundesliga · Serie A · Ligue 1 · Champions League.
-                Rankings update when games go <span className="text-white/80">FINAL</span>.
+                Rankings actualizan cuando los juegos van <span className="text-white/80">FINAL</span>.
               </p>
-              <p className="text-white/30 text-xs">⭐ Correct Draw pick = 200 pts</p>
             </div>
 
-            {/* Week nav + search — own row, always horizontal */}
             <div className="flex items-center gap-2 flex-wrap">
               <div className="flex items-center rounded-xl border border-white/10 bg-black/20 overflow-hidden">
-                <button onClick={() => setWeekOffset(v => v - 1)}
+                <button onClick={() => setWeekOffset(v => v-1)}
                   className="px-3 py-2 text-sm text-white/60 hover:bg-white/5 hover:text-white/90 transition border-r border-white/8">
                   ← Prev
                 </button>
@@ -148,13 +146,13 @@ export default function SoccerLeaderboardPage() {
                   className="px-4 py-2 text-sm text-white/60 hover:bg-white/5 hover:text-white/90 transition border-r border-white/8">
                   Current
                 </button>
-                <button onClick={() => setWeekOffset(v => v + 1)}
+                <button onClick={() => setWeekOffset(v => v+1)}
                   className="px-3 py-2 text-sm text-white/60 hover:bg-white/5 hover:text-white/90 transition">
                   Next →
                 </button>
               </div>
-              <input value={qText} onChange={e => setQText(e.target.value)} placeholder="Search player..."
-                className="w-52 rounded-xl border border-white/10 bg-black/30 px-4 py-2 text-sm text-white placeholder:text-white/30 outline-none focus:border-white/20" />
+              <input value={qText} onChange={e => setQText(e.target.value)} placeholder="Buscar jugador..."
+                className="w-full md:w-52 rounded-xl border border-white/10 bg-black/30 px-4 py-2 text-sm text-white placeholder:text-white/30 outline-none focus:border-white/20" />
             </div>
           </div>
 
@@ -165,13 +163,13 @@ export default function SoccerLeaderboardPage() {
                 className="px-4 py-2 text-sm text-white/55 hover:bg-white/5 hover:text-white/90 transition border-r border-white/8">
                 NBA
               </Link>
-              <Link href="/leaderboard/mlb"
-                className="px-4 py-2 text-sm text-white/55 hover:bg-white/5 hover:text-white/90 transition border-r border-white/8">
+              <span className="px-4 py-2 text-sm font-semibold text-red-300 bg-red-500/10 cursor-default border-r border-white/8">
                 MLB
-              </Link>
-              <span className="px-4 py-2 text-sm font-semibold text-emerald-300 bg-emerald-500/10 cursor-default">
-                ⚽ Soccer
               </span>
+              <Link href="/leaderboard/soccer"
+                className="px-4 py-2 text-sm text-white/55 hover:bg-white/5 hover:text-white/90 transition">
+                ⚽ Soccer
+              </Link>
             </div>
             <Link href="/leaderboard/daily"
               className="ml-auto flex items-center gap-1.5 rounded-xl border border-amber-400/20 bg-amber-400/8 px-4 py-2 text-sm font-semibold text-amber-300/80 hover:bg-amber-400/12 transition">
@@ -181,7 +179,7 @@ export default function SoccerLeaderboardPage() {
           </div>
 
           <div className="mb-5 flex flex-wrap gap-2">
-            {(["ALL", "ML", "SPREAD", "OU"] as Market[]).map(m => {
+            {(["ALL","ML","SPREAD","OU"] as Market[]).map(m => {
               const c = MARKET_CONFIG[m];
               const active = m === market;
               return (
@@ -199,10 +197,10 @@ export default function SoccerLeaderboardPage() {
           {/* My stats */}
           <div className="mb-5 grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
-              { label: "Players",      val: rows.length,                             sub: "Active this week" },
-              { label: "Your rank",    val: myRank ? `${medal(myRank)}` : "—",       sub: myRank ? `${myRank} of ${rows.length}` : "Not ranked yet" },
-              { label: "Your points",  val: myPts !== null ? `${myPts} pts` : "—",   sub: mc.label },
-              { label: "Win rate",     val: myWR !== null ? `${myWR}%` : "—",        sub: myRec.picks ? `${myRec.picks} picks` : `${myRec.w ?? 0}W-${myRec.l ?? 0}L-${myRec.p ?? 0}P` },
+              { label: "Players",    val: rows.length,                                  sub: "Active this week" },
+              { label: "Your rank",  val: myRank ? `${medal(myRank)}` : "—",            sub: myRank ? `${myRank} of ${rows.length}` : "Not ranked yet" },
+              { label: "Your points",val: myPts !== null ? `${myPts} pts` : "—",        sub: mc.label },
+              { label: "Win rate",   val: myWR !== null ? `${myWR}%` : "—",             sub: myRec.picks ? `${myRec.picks} picks` : `Record: ${myRec.w??0}-${myRec.l??0}-${myRec.p??0}` },
             ].map(({ label, val, sub }) => (
               <div key={label} className="rounded-2xl border border-white/10 bg-black/25 p-4">
                 <div className="text-xs text-white/50 mb-1">{label}</div>
@@ -219,6 +217,7 @@ export default function SoccerLeaderboardPage() {
                 <div className="text-xs font-bold uppercase tracking-widest text-white/30">Top 3 esta semana</div>
                 <div className="text-xs text-white/20">{weekId}</div>
               </div>
+
               <div className="flex items-end justify-center gap-3 px-4 pb-0 pt-2">
 
                 {/* #2 Silver */}
@@ -309,6 +308,7 @@ export default function SoccerLeaderboardPage() {
                   );
                 })()}
               </div>
+
               <div className="h-px bg-gradient-to-r from-transparent via-white/8 to-transparent mx-4" />
               <div className="px-4 py-2 text-[10px] text-white/18 text-center tracking-widest uppercase">
                 Win Rate · W · L · P · Puntos
@@ -318,7 +318,7 @@ export default function SoccerLeaderboardPage() {
 
           {/* Table */}
           <div className="rounded-2xl border border-white/10 bg-black/30 overflow-hidden">
-            <div className="grid grid-cols-[56px_1fr_80px_120px_100px] gap-3 border-b border-white/10 bg-black/30 px-4 py-3 text-xs font-semibold text-white/40 uppercase tracking-wider">
+            <div className="grid grid-cols-[40px_1fr_60px_90px_80px] gap-2 border-b border-white/10 bg-black/30 px-3 py-3 text-xs font-semibold text-white/40 uppercase tracking-wider">
               <div>Rank</div><div>Player</div>
               <div className="text-center">Win%</div>
               <div className="text-right">Record</div>
@@ -327,7 +327,7 @@ export default function SoccerLeaderboardPage() {
 
             {!user?.uid || loading ? (
               <div className="space-y-3 p-5">
-                {[1, 2, 3].map(i => <div key={i} className="h-14 animate-pulse rounded-xl bg-white/5" />)}
+                {[1,2,3].map(i=><div key={i} className="h-14 animate-pulse rounded-xl bg-white/5"/>)}
               </div>
             ) : err ? (
               <div className="m-4 rounded-xl border border-red-500/20 bg-red-500/8 p-4 text-red-300 text-sm">Error: {err}</div>
@@ -336,34 +336,34 @@ export default function SoccerLeaderboardPage() {
                 <div className="text-lg font-semibold">No rankings yet</div>
                 <div className="mt-1 text-white/60 text-sm">Points appear after resolved picks exist for this week.</div>
                 <div className="mt-4">
-                  <Link href="/tournaments/soccer" className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-sm text-white hover:bg-white/15 transition">
-                    Make picks →
+                  <Link href="/tournaments/nba" className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-sm text-white hover:bg-white/15 transition">
+                    Make picks
                   </Link>
                 </div>
               </div>
             ) : (
               <div className="divide-y divide-white/[0.06]">
                 {rows.map((r, idx) => {
-                  const rank = idx + 1;
-                  const isMe = !!(user?.uid && r.uid === user.uid);
-                  const top3 = rank <= 3;
-                  const rec  = recordOf(r, market);
-                  const pts  = pointsOf(r, market);
-                  const wr   = winRate(rec.w ?? 0, rec.l ?? 0, rec.p ?? 0);
-                  const name = (r.displayName || r.username || "User").trim();
+                  const rank  = idx + 1;
+                  const isMe  = !!(user?.uid && r.uid === user.uid);
+                  const top3  = rank <= 3;
+                  const rec   = recordOf(r, market);
+                  const pts   = pointsOf(r, market);
+                  const wr    = winRate(rec.w??0, rec.l??0, rec.p??0);
+                  const name  = (r.displayName || r.username || "User").trim();
 
                   return (
                     <div key={r.id}
                       className={[
-                        "grid grid-cols-[56px_1fr_80px_120px_100px] gap-3 px-4 py-3.5 text-sm transition-colors",
+                        "grid grid-cols-[40px_1fr_60px_90px_80px] gap-2 px-3 py-3.5 text-sm transition-colors",
                         isMe ? "bg-emerald-500/8" : "bg-black/20 hover:bg-white/[0.03]",
                       ].join(" ")}
                     >
-                      <div className="flex items-center text-white/70 font-semibold">{medal(rank)}</div>
+                      <div className="flex items-center text-white/70 font-semibold text-xs">{medal(rank)}</div>
 
-                      <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex items-center gap-2 min-w-0">
                         <div className={[
-                          "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-xs font-black",
+                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border text-xs font-black",
                           isMe ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-300"
                                : top3 ? "border-white/15 bg-white/8 text-white/70"
                                : "border-white/8 bg-white/5 text-white/40",
@@ -371,31 +371,29 @@ export default function SoccerLeaderboardPage() {
                           {initials(name)}
                         </div>
                         <div className="min-w-0">
-                          <div className={["truncate font-medium", isMe ? "text-emerald-300" : "text-white/80"].join(" ")}>{name}</div>
-                          <div className="truncate text-xs text-white/35">@{(r.username || name).toLowerCase().replace(/\s+/g, "")}</div>
+                          <div className={["truncate text-xs font-medium", isMe?"text-emerald-300":"text-white/80"].join(" ")}>{name}</div>
+                          <div className="truncate text-[10px] text-white/35">@{(r.username||name).toLowerCase().replace(/\s+/g,"")}</div>
                         </div>
                       </div>
 
                       <div className="flex flex-col items-center justify-center gap-1">
                         <span className="text-xs font-semibold text-white/60 tabular-nums">{wr}%</span>
-                        <div className="h-1 w-12 rounded-full bg-white/10 overflow-hidden">
+                        <div className="h-1 w-8 rounded-full bg-white/10 overflow-hidden">
                           <div className="h-full rounded-full bg-emerald-400/50" style={{ width: `${wr}%` }} />
                         </div>
                       </div>
 
                       <div className="flex items-center justify-end gap-1 text-xs tabular-nums">
-                        <span className="font-semibold text-green-400/80">{rec.w ?? 0}W</span>
+                        <span className="font-semibold text-green-400/80">{rec.w??0}W</span>
                         <span className="text-white/20">·</span>
-                        <span className="font-semibold text-red-400/70">{rec.l ?? 0}L</span>
-                        <span className="text-white/20">·</span>
-                        <span className="font-semibold text-yellow-400/60">{rec.p ?? 0}P</span>
+                        <span className="font-semibold text-red-400/70">{rec.l??0}L</span>
                       </div>
 
                       <div className={[
-                        "flex items-center justify-end text-sm font-bold tabular-nums",
-                        isMe ? "text-emerald-300" : top3 ? "text-white" : "text-white/60",
+                        "flex items-center justify-end text-xs font-bold tabular-nums",
+                        isMe?"text-emerald-300":top3?"text-white":"text-white/60",
                       ].join(" ")}>
-                        {pts.toLocaleString()}<span className="ml-1 text-xs font-normal text-white/30">pts</span>
+                        {pts.toLocaleString()}<span className="ml-0.5 text-[10px] font-normal text-white/30">pts</span>
                       </div>
                     </div>
                   );
@@ -405,8 +403,8 @@ export default function SoccerLeaderboardPage() {
           </div>
 
           <div className="mt-4 flex items-center justify-between text-xs text-white/25">
-            <span>Win 100 · Draw correct 200 · Push 50 · Loss 0</span>
-            <span>{rows.length} player{rows.length !== 1 ? "s" : ""}</span>
+            <span>Win 100 · Push 50 · Loss 0</span>
+            <span>{rows.length} jugador{rows.length !== 1 ? "es" : ""}</span>
           </div>
 
         </div>

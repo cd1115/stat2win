@@ -796,7 +796,7 @@ export default function MlbTournamentPage() {
     return (
       <div
         key={key}
-        className="rounded-2xl border border-white/10 bg-black/20 p-4"
+        className="rounded-2xl border border-white/10 bg-black/20 p-3 md:p-4"
       >
         <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="min-w-0">
@@ -878,7 +878,7 @@ export default function MlbTournamentPage() {
         {/* DraftKings-style layout */}
         <div className="mt-3 space-y-0">
           {/* Column headers */}
-          <div className="grid grid-cols-[1fr_1fr_1fr_1fr] gap-1.5 mb-1.5 px-1">
+          <div className="grid grid-cols-[minmax(0,1.6fr)_1fr_1.1fr_1fr] gap-1.5 mb-1.5 px-1">
             <div />
             {showSpread ? <div className="text-center text-[10px] font-semibold uppercase tracking-wider text-white/40">Spread</div> : null}
             {showOU ? <div className="text-center text-[10px] font-semibold uppercase tracking-wider text-white/40">Total</div> : null}
@@ -886,10 +886,13 @@ export default function MlbTournamentPage() {
           </div>
 
           {/* Away row */}
-          <div className="grid grid-cols-[1fr_1fr_1fr_1fr] gap-1.5 items-center">
+          <div className="grid grid-cols-[minmax(0,1.6fr)_1fr_1.1fr_1fr] gap-1.5 items-center">
             <div className="flex items-center gap-2 min-w-0">
               <TeamLogo code={awayAbbr} size={32} />
-              <span className="truncate text-sm font-semibold text-white">{awayAbbr}</span>
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold text-white/40 uppercase tracking-wide">{awayAbbr}</div>
+                <div className="truncate text-sm font-bold text-white leading-tight">{g.awayTeam}</div>
+              </div>
             </div>
 
             {showSpread ? (
@@ -908,7 +911,7 @@ export default function MlbTournamentPage() {
                 disabled={closed || !gameKeySafe || typeof totalLine !== "number"}
                 onClick={() => savePick({ g, market: "ou", pick: "over", line: totalLine, selection: "OVER" })}
               >
-                <div className="text-center text-sm font-bold">{typeof totalLine === "number" ? `O ${totalLine}` : "—"}</div>
+                <div className="text-center text-xs font-bold whitespace-nowrap">{typeof totalLine === "number" ? `O ${totalLine}` : "—"}</div>
               </button>
             ) : null}
 
@@ -924,10 +927,13 @@ export default function MlbTournamentPage() {
           </div>
 
           {/* Home row */}
-          <div className="grid grid-cols-[1fr_1fr_1fr_1fr] gap-1.5 items-center mt-1.5">
+          <div className="grid grid-cols-[minmax(0,1.6fr)_1fr_1.1fr_1fr] gap-1.5 items-center mt-1.5">
             <div className="flex items-center gap-2 min-w-0">
               <TeamLogo code={homeAbbr} size={32} />
-              <span className="truncate text-sm font-semibold text-white">{homeAbbr}</span>
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold text-white/40 uppercase tracking-wide">{homeAbbr}</div>
+                <div className="truncate text-sm font-bold text-white leading-tight">{g.homeTeam}</div>
+              </div>
             </div>
 
             {showSpread ? (
@@ -946,7 +952,7 @@ export default function MlbTournamentPage() {
                 disabled={closed || !gameKeySafe || typeof totalLine !== "number"}
                 onClick={() => savePick({ g, market: "ou", pick: "under", line: totalLine, selection: "UNDER" })}
               >
-                <div className="text-center text-sm font-bold">{typeof totalLine === "number" ? `U ${totalLine}` : "—"}</div>
+                <div className="text-center text-xs font-bold whitespace-nowrap">{typeof totalLine === "number" ? `U ${totalLine}` : "—"}</div>
               </button>
             ) : null}
 
@@ -971,7 +977,7 @@ export default function MlbTournamentPage() {
 
   return (
     <Protected>
-      <div className="px-6 py-6">
+      <div className="px-3 py-4 md:px-6 md:py-6">
         <div className="mx-auto max-w-6xl">
           <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div className="min-w-0">
