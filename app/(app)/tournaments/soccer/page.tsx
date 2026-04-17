@@ -40,8 +40,316 @@ function LeagueBadge({ league }: { league: string }) {
   );
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function fmtStart(ts: any) {
+// ─── Soccer team logo map (ESPN CDN slugs) ───────────────────────────────────
+const SOCCER_SLUGS: Record<string, string> = {
+  // EPL
+  "Arsenal":            "arsenal",
+  "Chelsea":            "chelsea",
+  "Liverpool":          "liverpool",
+  "Manchester City":    "manchester-city",
+  "Manchester United":  "manchester-united",
+  "Tottenham":          "tottenham-hotspur",
+  "Newcastle":          "newcastle-united",
+  "Aston Villa":        "aston-villa",
+  "West Ham":           "west-ham-united",
+  "Brighton":           "brighton-hove-albion",
+  "Wolves":             "wolverhampton-wanderers",
+  "Everton":            "everton",
+  "Crystal Palace":     "crystal-palace",
+  "Brentford":          "brentford",
+  "Fulham":             "fulham",
+  "Nottingham Forest":  "nottingham-forest",
+  "Bournemouth":        "bournemouth",
+  "Leicester":          "leicester-city",
+  "Ipswich":            "ipswich-town",
+  "Southampton":        "southampton",
+  // La Liga
+  "Real Madrid":        "real-madrid",
+  "Barcelona":          "fc-barcelona",
+  "Atletico Madrid":    "atletico-de-madrid",
+  "Sevilla":            "sevilla",
+  "Real Betis":         "real-betis",
+  "Valencia":           "valencia",
+  "Athletic Club":      "athletic-club",
+  "Real Sociedad":      "real-sociedad",
+  "Villarreal":         "villarreal",
+  "Celta Vigo":         "rc-celta",
+  "Osasuna":            "ca-osasuna",
+  "Girona":             "girona-fc",
+  "Getafe":             "getafe",
+  "Rayo Vallecano":     "rayo-vallecano",
+  "Mallorca":           "rcd-mallorca",
+  "Alaves":             "deportivo-alaves",
+  "Las Palmas":         "ud-las-palmas",
+  "Leganes":            "cd-leganes",
+  "Espanyol":           "rcd-espanyol",
+  "Valladolid":         "real-valladolid",
+  // Bundesliga
+  "Bayern Munich":      "fc-bayern-munchen",
+  "Borussia Dortmund":  "borussia-dortmund",
+  "RB Leipzig":         "rb-leipzig",
+  "Bayer Leverkusen":   "bayer-04-leverkusen",
+  "Eintracht Frankfurt":"eintracht-frankfurt",
+  "Wolfsburg":          "vfl-wolfsburg",
+  "Freiburg":           "sc-freiburg",
+  "Hoffenheim":         "1899-hoffenheim",
+  "Borussia Monchengladbach": "borussia-monchengladbach",
+  "Mainz":              "1-fsv-mainz-05",
+  "Stuttgart":          "vfb-stuttgart",
+  "Augsburg":           "fc-augsburg",
+  "Union Berlin":       "1-fc-union-berlin",
+  "Werder Bremen":      "sv-werder-bremen",
+  "Hamburger SV":       "hamburger-sv",
+  "Holstein Kiel":      "holstein-kiel",
+  "St. Pauli":          "fc-st-pauli",
+// Bundesliga extra
+  "1. FC Köln": "fc-koln",
+  "FC Köln": "fc-koln",
+  "Köln": "fc-koln",
+
+  "TSG Hoffenheim": "tsg-hoffenheim",
+  "Hoffenheim": "tsg-hoffenheim",
+
+  "Union Berlin": "union-berlin",
+
+  "Augsburg": "fc-augsburg",
+  "FC Augsburg": "fc-augsburg",
+
+  // Serie A
+  "Parma": "parma",
+
+  // Premier League
+  "Leeds United": "leeds-united",
+
+  // Serie A
+  "Juventus":           "juventus",
+  "AC Milan":           "ac-milan",
+  "Inter Milan":        "inter-milan",
+  "Napoli":             "ssc-napoli",
+  "Roma":               "as-roma",
+  "Lazio":              "ss-lazio",
+  "Atalanta":           "atalanta-bc",
+  "Fiorentina":         "acf-fiorentina",
+  "Torino":             "torino",
+  "Bologna":            "bologna",
+  "Udinese":            "udinese",
+  "Monza":              "ac-monza",
+  "Cagliari":           "cagliari",
+  "Genoa":              "genoa",
+  "Empoli":             "empoli",
+  "Como":               "como-1907",
+  "Parma":              "parma",
+  "Lecce":              "us-lecce",
+  "Venezia":            "venezia",
+  "Hellas Verona":      "hellas-verona",
+  // Ligue 1
+  "PSG":                "paris-saint-germain",
+  "Paris Saint-Germain":"paris-saint-germain",
+  "Marseille":          "olympique-de-marseille",
+  "Monaco":             "as-monaco",
+  "Lyon":               "olympique-lyonnais",
+  "Lille":              "losc-lille",
+  "Nice":               "ogc-nice",
+  "Lens":               "rc-lens",
+  "Rennes":             "stade-rennais-fc",
+  "Strasbourg":         "rc-strasbourg-alsace",
+  "Reims":              "stade-de-reims",
+  "Brest":              "stade-brestois-29",
+  "Nantes":             "fc-nantes",
+  "Montpellier":        "montpellier-hsc",
+  "Toulouse":           "toulouse-fc",
+  "Angers":             "angers-sco",
+  "Le Havre":           "le-havre-ac",
+  "Saint-Etienne":      "as-saint-etienne",
+  "Auxerre":            "aj-auxerre",
+  // Champions League extra
+  "Sporting CP":        "sporting-cp",
+  "Benfica":            "sl-benfica",
+  "Porto":              "fc-porto",
+  "Ajax":               "ajax",
+  "PSV":                "psv-eindhoven",
+  "Celtic":             "celtic",
+  "Rangers":            "rangers",
+  //"Juventus":           "juventus",
+  "Dortmund":           "borussia-dortmund",
+  // Extra aliases Firebase might use
+  "Inter":              "inter-milan",
+  "Milan":              "ac-milan",
+  "Roma":               "as-roma",
+  "Lazio":              "ss-lazio",
+  "Cagliari Calcio":    "cagliari",
+  "Como 1907":          "como-1907",
+  "FC Como":            "como-1907",
+  "Sassuolo":           "sassuolo",
+  "Salernitana":        "salernitana",
+  "Frosinone":          "frosinone",
+  "Spezia":             "spezia",
+  "Cremonese":          "cremonese",
+  "Lecce":              "us-lecce",
+  "US Lecce":           "us-lecce",
+  "SS Lazio":           "ss-lazio",
+  "AS Roma":            "as-roma",
+  "AC Milan":           "ac-milan",
+  "Inter Milan":        "inter-milan",
+  "FC Barcelona":       "fc-barcelona",
+  "Atlético Madrid":    "atletico-de-madrid",
+  "Atletico de Madrid": "atletico-de-madrid",
+  "Atlético de Madrid": "atletico-de-madrid",
+  "Real Betis Balompie":"real-betis",
+  "Athletic Bilbao":    "athletic-club",
+  "FC Bayern Munich":   "fc-bayern-munchen",
+  "FC Bayern München":  "fc-bayern-munchen",
+  "Bayern":             "fc-bayern-munchen",
+  "Leverkusen":         "bayer-04-leverkusen",
+  "Frankfurt":          "eintracht-frankfurt",
+  "Werder":             "sv-werder-bremen",
+  "Hamburger":          "hamburger-sv",
+  "Hamburg":            "hamburger-sv",
+  "Kiel":               "holstein-kiel",
+  "St Pauli":           "fc-st-pauli",
+  "FC St. Pauli":       "fc-st-pauli",
+  "Paris SG":           "paris-saint-germain",
+  "Paris Saint Germain":"paris-saint-germain",
+  "Olympique Marseille":"olympique-de-marseille",
+  "Olympique Lyonnais": "olympique-lyonnais",
+  "LOSC":               "losc-lille",
+  "LOSC Lille":         "losc-lille",
+  "OGC Nice":           "ogc-nice",
+  "RC Lens":            "rc-lens",
+  "Stade Rennais":      "stade-rennais-fc",
+  "Stade de Reims":     "stade-de-reims",
+  "Stade Brestois":     "stade-brestois-29",
+  "FC Nantes":          "fc-nantes",
+  "Montpellier HSC":    "montpellier-hsc",
+  "Toulouse FC":        "toulouse-fc",
+  "Le Havre AC":        "le-havre-ac",
+  "AS Saint-Etienne":   "as-saint-etienne",
+  "AJ Auxerre":         "aj-auxerre",
+  "Sporting Lisbon":    "sporting-cp",
+  "Sporting":           "sporting-cp",
+  "SL Benfica":         "sl-benfica",
+  "FC Porto":           "fc-porto",
+  "PSV Eindhoven":      "psv-eindhoven",
+  "Newcsatle":          "newcastle-united",
+  "Newcastle United":   "newcastle-united",
+  "Nottm Forest":       "nottingham-forest",
+  "Nott'm Forest":      "nottingham-forest",
+  "Wolves":             "wolverhampton-wanderers",
+  "Wolverhampton":      "wolverhampton-wanderers",
+  "Brighton & Hove Albion": "brighton-hove-albion",
+  "West Ham United":    "west-ham-united",
+  "Tottenham Hotspur":  "tottenham-hotspur",
+  "Spurs":              "tottenham-hotspur",
+  "Man City":           "manchester-city",
+  "Man United":         "manchester-united",
+  "Man Utd":            "manchester-united",
+};
+
+function soccerLogoUrl(teamName: string): string | null {
+  // Direct match
+  let slug = SOCCER_SLUGS[teamName];
+  if (slug) return `/teams/soccer/${slug}.png`;
+
+  // Try trimmed
+  slug = SOCCER_SLUGS[teamName.trim()];
+  if (slug) return `/teams/soccer/${slug}.png`;
+
+  // Try removing common prefixes/suffixes
+  const clean = teamName
+    .replace(/^(FC|AC|AS|SS|RC|SC|SV|VfB|VfL|1\.?\s*FC|CD|UD|RCD|CA|CF)\s+/i, "")
+    .replace(/\s+(FC|SC|CF|AC|BC|CP|SV)$/i, "")
+    .trim();
+
+  slug = SOCCER_SLUGS[clean];
+  if (slug) return `/teams/soccer/${slug}.png`;
+
+  // Try lowercase key match
+  const lower = teamName.toLowerCase();
+  for (const [key, val] of Object.entries(SOCCER_SLUGS)) {
+    if (key.toLowerCase() === lower) return `/teams/soccer/${val}.png`;
+  }
+
+  // Partial match — if team name contains a key
+  for (const [key, val] of Object.entries(SOCCER_SLUGS)) {
+    if (lower.includes(key.toLowerCase()) || key.toLowerCase().includes(lower)) {
+      return `/teams/soccer/${val}.png`;
+    }
+  }
+
+  return null;
+}
+function SoccerTeamLogo({ name, size = 36 }: { name: string; size?: number }) {
+  const [err, setErr] = useState(false);
+
+  const slug = (() => {
+    let s = SOCCER_SLUGS[name];
+
+    if (!s) {
+      const trimmed = name.trim();
+      s = SOCCER_SLUGS[trimmed];
+    }
+
+    if (!s) {
+      const clean = name
+        .replace(/^(FC|AC|AS|SS|RC|SC|SV|VfB|VfL|1\.?\s*FC|CD|UD|RCD|CA|CF)\s+/i, "")
+        .replace(/\s+(FC|SC|CF|AC|BC|CP|SV)$/i, "")
+        .trim();
+
+      s = SOCCER_SLUGS[clean];
+    }
+
+    if (!s) {
+      const lower = name.toLowerCase();
+      for (const [key, val] of Object.entries(SOCCER_SLUGS)) {
+        if (
+          key.toLowerCase() === lower ||
+          lower.includes(key.toLowerCase()) ||
+          key.toLowerCase().includes(lower)
+        ) {
+          s = val;
+          break;
+        }
+      }
+    }
+
+    return s;
+  })();
+
+  const src = slug ? `/teams/soccer/${slug}.png` : null;
+  const initials = name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("");
+
+  if (!src || err) {
+    return (
+      <div
+        className="flex items-center justify-center rounded-xl border border-white/10 bg-white/5 text-[10px] font-black text-white/50 shrink-0"
+        style={{ width: size, height: size }}
+        title={name}
+      >
+        {initials}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="flex items-center justify-center overflow-hidden rounded-xl border border-white/8 bg-white shrink-0 p-0.5"
+      style={{ width: size, height: size }}
+      title={name}
+    >
+      <img
+        src={src}
+        alt={name}
+        className="object-contain w-full h-full"
+        onError={() => setErr(true)}
+      />
+    </div>
+  );
+}
+function fmtStart(ts: any): string {
   try {
     const d: Date = ts?.toDate?.() instanceof Date ? ts.toDate()
       : ts instanceof Date ? ts
@@ -380,21 +688,48 @@ if (statusFilter !== "all" && g.status !== statusFilter) return false;
                       const busy = (k: string) => savingKey === `${gameKey}:${k}`;
 
                       return (
-                        <div key={gameKey} className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                        <div key={gameKey} className="rounded-2xl border border-white/8 bg-white/[0.03] overflow-hidden">
                           {/* Game header */}
-                          <div className="flex flex-wrap items-center gap-2 mb-4">
-                            <span className="text-base font-semibold text-white">{away} <span className="text-white/30">@</span> {home}</span>
-                            <span className={["rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                              closed ? g.status === "final" ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400" : "border-amber-400/25 bg-amber-500/10 text-amber-300"
-                                     : "border-blue-400/20 bg-blue-500/8 text-blue-300"].join(" ")}>
-                              {g.status === "final" ? "Final" : g.status === "inprogress" ? "🔴 Live" : "Scheduled"}
-                            </span>
-                            {g.startTime && <span className="text-xs text-white/35">{fmtStart(g.startTime)}</span>}
-                            {closed && g.status === "final" && (
-                              <span className="text-xs font-bold text-white/60">{g.scoreAway ?? "?"} – {g.scoreHome ?? "?"}</span>
-                            )}
+                          <div className="flex items-center justify-between px-4 py-3 border-b border-white/6 bg-black/20">
+                            <div className="flex items-center gap-4 min-w-0 flex-1">
+                              {/* Away team */}
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <SoccerTeamLogo name={away} size={40} />
+                                <div className="min-w-0">
+                                  <div className="text-sm font-bold text-white truncate max-w-[90px] md:max-w-[160px]">{away}</div>
+                                  <div className="text-[10px] text-white/35">Away</div>
+                                </div>
+                              </div>
+                              {/* Score or vs */}
+                              <div className="flex flex-col items-center shrink-0 px-1">
+                                {closed && g.status === "final" ? (
+                                  <>
+                                    <div className="text-base font-black tabular-nums text-white">{g.scoreAway ?? "?"} – {g.scoreHome ?? "?"}</div>
+                                    <div className="text-[9px] text-white/30 uppercase tracking-wider">Final</div>
+                                  </>
+                                ) : (
+                                  <span className="text-white/20 text-xs">vs</span>
+                                )}
+                              </div>
+                              {/* Home team */}
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <SoccerTeamLogo name={home} size={40} />
+                                <div className="min-w-0">
+                                  <div className="text-sm font-bold text-white truncate max-w-[90px] md:max-w-[160px]">{home}</div>
+                                  <div className="text-[10px] text-white/35">Home</div>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex flex-col items-end gap-1 shrink-0 ml-2">
+                              <span className={["rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                                closed ? g.status === "final" ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400" : "border-amber-400/25 bg-amber-500/10 text-amber-300"
+                                       : "border-blue-400/20 bg-blue-500/8 text-blue-300"].join(" ")}>
+                                {g.status === "final" ? "Final" : g.status === "inprogress" ? "🔴 Live" : "Open"}
+                              </span>
+                              {g.startTime && <span className="text-[10px] text-white/30">{fmtStart(g.startTime)}</span>}
+                            </div>
                           </div>
-
+                          <div className="p-4">
                           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                             {/* Moneyline — 3-way, no odds shown */}
                             {showML && (
@@ -443,11 +778,12 @@ if (statusFilter !== "all" && g.status !== statusFilter) return false;
                                 )}
                               </div>
                             )}
-                          </div>
+                          </div>{/* end grid */}
+                          </div>{/* end p-4 */}
 
                           {/* Active picks summary */}
                           {(mlPick || spPick || ouPick) && (
-                            <div className="mt-3 flex flex-wrap gap-2">
+                            <div className="px-4 pb-3 flex flex-wrap gap-2">
                               {[["moneyline", mlPick], ["spread", spPick], ["ou", ouPick]].map(([mk, pk]: any) =>
                                 pk ? (
                                   <button key={mk} disabled={busy(mk)} onClick={() => handlePick(g, mk, pk.pick, pk.line)}

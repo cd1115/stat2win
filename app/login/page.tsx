@@ -6,6 +6,8 @@ import { useSearchParams, useRouter } from "next/navigation";
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup,
   type User,
 } from "firebase/auth";
 import { auth } from "@/lib/firebase";
@@ -32,6 +34,7 @@ function LoginPageInner() {
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [checking, setChecking] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -81,6 +84,37 @@ function LoginPageInner() {
     }
   }
 
+  async function handleGoogleLogin() {
+    setErr(null);
+    setGoogleLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+      try {
+        await ensureUserProfileClient();
+      } catch {}
+      try {
+        await auth.currentUser?.getIdToken(true);
+      } catch {}
+      router.replace(nextParam || "/overview");
+    } catch (error: unknown) {
+      const code = (error as { code?: string })?.code;
+      if (code === "auth/popup-closed-by-user") {
+        // silently ignore
+      } else if (code === "auth/cancelled-popup-request") {
+        // silently ignore
+      } else {
+        setErr(
+          (error as { message?: string })?.message ??
+            "No se pudo iniciar sesión con Google.",
+        );
+      }
+    } finally {
+      setGoogleLoading(false);
+    }
+  }
+
+
   if (checking) {
     return (
       <div className="min-h-screen grid place-items-center bg-[#05070B]">
@@ -95,112 +129,47 @@ function LoginPageInner() {
   if (user) return null;
 
   return (
-    <div className="min-h-screen relative overflow-hidden bg-[#05070B]">
+    <div className="min-h-screen relative overflow-hidden bg-[#05070B] flex flex-col">
       {/* Background glows */}
-      <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 h-[520px] w-[820px] rounded-full bg-blue-500/20 blur-3xl opacity-55" />
+      <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 h-[520px] w-[820px] rounded-full bg-blue-500/30 blur-3xl opacity-70" />
+      <div className="pointer-events-none absolute top-1/3 right-0 h-[400px] w-[400px] rounded-full bg-blue-600/20 blur-3xl" />
+      <div className="pointer-events-none absolute bottom-0 left-1/4 h-[300px] w-[500px] rounded-full bg-blue-700/15 blur-3xl" />
 
-      <div className="pointer-events-none absolute top-1/3 right-0 h-[350px] w-[350px] rounded-full bg-blue-600/8 blur-3xl" />
+      {/* Top bar */}
+      <div className="relative flex items-center justify-between px-8 py-6">
+        <Link
+          href="/"
+          className="text-xl font-bold tracking-tight text-white"
+        >
+          Stat<span className="text-blue-400">2</span>Win
+        </Link>
+        <Link
+          href="/"
+          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/65 hover:border-white/18 hover:bg-white/8 hover:text-white/85 transition"
+        >
+          Home page
+        </Link>
+      </div>
 
-      <div className="relative mx-auto max-w-6xl px-6 py-12">
-        {/* Top bar */}
-        <div className="flex items-center justify-between mb-12">
-          <Link
-            href="/"
-            className="text-xl font-bold tracking-tight text-white"
-          >
-            Stat<span className="text-blue-400">2</span>Win
-          </Link>
-          <Link
-            href="/"
-            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/65 hover:border-white/18 hover:bg-white/8 hover:text-white/85 transition"
-          >
-            Home page
-          </Link>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-          {/* ── Left — marketing ── */}
-          <div className="space-y-7">
-            <div className="flex flex-wrap gap-2">
-              {["No gambling", "Skill-based", "Weekly prizes"].map((t) => (
-                <span
-                  key={t}
-                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/65"
-                >
-                  {t}
-                </span>
-              ))}
+      {/* Centered form */}
+      <div className="relative flex-1 flex items-center justify-center px-4 py-12">
+        <div className="w-full max-w-md">
+          {/* Logo mark */}
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center px-5 py-2.5 rounded-2xl bg-blue-500/10 border border-blue-500/20 mb-4">
+              <span className="text-xl font-extrabold tracking-tight text-white">
+                Stat<span className="text-blue-400">2</span>Win
+              </span>
             </div>
-
-            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-white leading-tight">
-              Pick winners. <br className="hidden md:block" />
-              Earn points. <span className="text-blue-400">Win prizes.</span>
+            <h1 className="text-2xl font-bold text-white tracking-tight">
+              Welcome back
             </h1>
-
-            <p className="text-white/50 text-base max-w-md leading-relaxed">
-              Compite en torneos diarios de NBA y MLB. Sin apuestas, sin odds —
-              solo estrategia y conocimiento deportivo.
+            <p className="mt-1.5 text-sm text-white/45">
+              Inicia sesión para ver tus picks y torneos.
             </p>
-
-            {/* Quick stats */}
-            <div className="flex gap-8">
-              {[
-                { val: "100 pts", label: "por pick correcto" },
-                { val: "Diario", label: "nuevo torneo" },
-                { val: "Gratis", label: "para empezar" },
-              ].map((s) => (
-                <div key={s.label}>
-                  <div className="text-base font-bold text-white">{s.val}</div>
-                  <div className="text-xs text-white/38 mt-0.5">{s.label}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Feature cards */}
-            <div className="grid grid-cols-3 gap-3 max-w-md">
-              {[
-                {
-                  icon: "🔒",
-                  title: "Pick locks",
-                  desc: "Se bloquea al inicio del juego.",
-                },
-                {
-                  icon: "📊",
-                  title: "Points",
-                  desc: "100 pts por pick correcto.",
-                },
-                {
-                  icon: "🏆",
-                  title: "Leaderboard",
-                  desc: "Ranking diario y semanal.",
-                },
-              ].map((f) => (
-                <div
-                  key={f.title}
-                  className="rounded-2xl border border-white/8 bg-white/[0.04] p-4"
-                >
-                  <div className="text-lg mb-1.5">{f.icon}</div>
-                  <div className="text-xs font-semibold text-white/85">
-                    {f.title}
-                  </div>
-                  <div className="mt-0.5 text-[11px] text-white/42 leading-snug">
-                    {f.desc}
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
 
-          {/* ── Right — login form ── */}
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-7 backdrop-blur-xl">
-            {/* Form header */}
-            <div className="mb-6">
-              <div className="text-2xl font-bold text-white">Welcome back</div>
-              <div className="mt-1 text-sm text-white/48">
-                Inicia sesión para ver tus picks y torneos.
-              </div>
-            </div>
-
+          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-7 backdrop-blur-xl shadow-[0_0_80px_-20px_rgba(59,130,246,0.15)]">
             {/* Logout notice */}
             {fromLogout && (
               <div className="mb-5 rounded-xl border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-200">
@@ -217,6 +186,33 @@ function LoginPageInner() {
             )}
 
             <form onSubmit={handleLogin} className="space-y-4">
+              {/* Google Sign-in */}
+              <button
+                type="button"
+                onClick={handleGoogleLogin}
+                disabled={googleLoading || loading}
+                className="w-full h-11 rounded-xl border border-white/10 bg-white/[0.05] hover:bg-white/[0.08] hover:border-white/18 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-3 text-sm font-medium text-white/80 hover:text-white"
+              >
+                {googleLoading ? (
+                  <span className="inline-block w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
+                    <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
+                    <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
+                    <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+                  </svg>
+                )}
+                Continuar con Google
+              </button>
+
+              {/* Divider */}
+              <div className="flex items-center gap-3">
+                <div className="flex-1 h-px bg-white/8" />
+                <span className="text-[11px] text-white/28">o inicia con email</span>
+                <div className="flex-1 h-px bg-white/8" />
+              </div>
+
               {/* Email */}
               <div>
                 <label className="text-xs font-medium text-white/50 uppercase tracking-wide">
@@ -283,14 +279,7 @@ function LoginPageInner() {
                 )}
               </button>
 
-              {/* Divider */}
-              <div className="flex items-center gap-3 py-0.5">
-                <div className="flex-1 h-px bg-white/8" />
-                <span className="text-[11px] text-white/28">o</span>
-                <div className="flex-1 h-px bg-white/8" />
-              </div>
-
-              {/* Signup CTA — includes +25 RP badge to motivate */}
+              {/* Signup CTA */}
               <Link
                 href="/signup"
                 className="flex items-center justify-center gap-1.5 w-full h-11 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/6 hover:border-white/15 transition text-sm text-white/65 hover:text-white/85 font-medium"
