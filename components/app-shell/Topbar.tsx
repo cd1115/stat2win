@@ -370,9 +370,13 @@ function NotificationBell({ uid }: { uid: string }) {
 export default function Topbar({
   onMenu,
   title = "Dashboard",
+  picksOpen = false,
+  onPicksToggle,
 }: {
   onMenu: () => void;
   title?: string;
+  picksOpen?: boolean;
+  onPicksToggle?: () => void;
 }) {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
@@ -463,6 +467,8 @@ export default function Topbar({
             </>
           )}
 
+
+       
           {/* Notification bell */}
           {user ? (
             <NotificationBell uid={user.uid} />
