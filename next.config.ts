@@ -5,7 +5,6 @@ const nextConfig: NextConfig = {
     unoptimized: true,
     formats: ["image/avif", "image/webp"],
   },
-  // Asegurar que los archivos estáticos se sirvan correctamente
   staticPageGenerationTimeout: 1000,
 };
 

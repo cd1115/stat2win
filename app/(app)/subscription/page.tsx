@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { cn } from "@/lib/cn";
 import { useUserEntitlements } from "@/lib/useUserEntitlements";
+import { auth, db } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
 
 const REDEEM_POINTS_COST = 10000;
 
@@ -119,18 +121,62 @@ export default function SubscriptionPage() {
     if (isPremium) return;
     setBusy(true);
     try {
-      // TODO: replace with Stripe checkout session
-      alert("Stripe checkout — coming soon.");
+      const user = auth.currentUser;
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+      const res = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user.uid,
+          email: user.email,
+        }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert("Error: " + (data.error || "No se pudo iniciar el checkout"));
+      }
+    } catch (err) {
+      console.error("onUpgrade error:", err);
+      alert("Error al conectar con Stripe");
     } finally {
       setBusy(false);
     }
   }
 
   async function onManage() {
-    // TODO: replace with Stripe customer portal redirect
-    alert("Stripe Customer Portal — coming soon.");
+    setBusy(true);
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+      const snap = await getDoc(doc(db, "users", user.uid));
+      const customerId = snap.data()?.stripeCustomerId;
+      if (!customerId) {
+        alert("No se encontró tu cuenta de Stripe");
+        return;
+      }
+      const res = await fetch("/api/stripe/portal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerId }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert("Error: " + (data.error || "No se pudo abrir el portal"));
+      }
+    } catch (err) {
+      console.error("onManage error:", err);
+      alert("Error al conectar con Stripe");
+    } finally {
+      setBusy(false);
+    }
   }
-
   async function onRedeemFreeMonth() {
     if (!canRedeemFreeMonth) return;
     setRedeeming(true);
