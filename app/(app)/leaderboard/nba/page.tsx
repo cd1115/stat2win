@@ -6,6 +6,8 @@ import { getWeekId } from "@/lib/week";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getFunctions, httpsCallable } from "firebase/functions";
+import { db } from "@/lib/firebase";
+import { collection, getDocs, query, where, documentId } from "firebase/firestore";
 import { getApp } from "firebase/app";
 
 type Market = "ALL" | "ML" | "SPREAD" | "OU";
@@ -97,6 +99,53 @@ export default function LeaderboardPage() {
     timer = setInterval(load, 30000);
     return () => { cancelled = true; if (timer) clearInterval(timer); };
   }, [user?.uid, weekId, market]);
+
+  // ── Avatar URLs: batch-fetch from Firestore by UID ─────────────────────────
+  const [avatarUrls, setAvatarUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const uids = rowsRaw.map(r => r.uid).filter(Boolean);
+    if (!uids.length) { setAvatarUrls({}); return; }
+
+    async function fetchAvatars() {
+      try {
+        // Firestore "in" query has limit of 30 per batch
+        const chunks: string[][] = [];
+        for (let i = 0; i < uids.length; i += 30) chunks.push(uids.slice(i, i + 30));
+        const map: Record<string, string> = {};
+        for (const chunk of chunks) {
+          const q = query(collection(db, "users"), where(documentId(), "in", chunk));
+          const snap = await getDocs(q);
+          snap.forEach(d => {
+            const url = (d.data() as any)?.avatarUrl;
+            if (url) map[d.id] = url;
+          });
+        }
+        setAvatarUrls(map);
+      } catch {}
+    }
+    fetchAvatars();
+  }, [rowsRaw]);
+
+  // ── Helper: render avatar circle or image ────────────────────────────────
+  function AvatarCircle({ uid, name, size, isMe, colorClass }: {
+    uid: string; name: string; size: number; isMe: boolean; colorClass: string;
+  }) {
+    const url = avatarUrls[uid];
+    if (url) {
+      return (
+        <div className="shrink-0 overflow-hidden rounded-xl" style={{ width: size, height: size }}>
+          <img src={url} alt={name} className="w-full h-full object-cover" />
+        </div>
+      );
+    }
+    return (
+      <div className={["shrink-0 flex items-center justify-center rounded-xl border font-black", colorClass].join(" ")}
+        style={{ width: size, height: size, fontSize: Math.round(size * 0.33) }}>
+        {initials(name)}
+      </div>
+    );
+  }
 
   const rows = useMemo(() => {
     const t = qText.trim().toLowerCase();
@@ -228,7 +277,9 @@ export default function LeaderboardPage() {
                   const isMe2 = user?.uid === r2.uid;
                   return (
                     <div className="flex flex-col items-center gap-1.5 flex-1">
-                      <div className={`flex h-11 w-11 items-center justify-center rounded-2xl border-2 text-sm font-black ${isMe2 ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-300" : "border-slate-400/40 bg-slate-400/10 text-slate-300"}`}>{initials(name2)}</div>
+                      <AvatarCircle uid={r2.uid} name={name2} size={44}
+                        isMe={isMe2}
+                        colorClass={isMe2 ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-300 text-sm" : "border-slate-400/40 bg-slate-400/10 text-slate-300 text-sm"} />
                       <div className="text-center">
                         <div className={`text-xs font-bold truncate max-w-[72px] ${isMe2 ? "text-emerald-300" : "text-white/80"}`}>{name2.split(" ")[0]}</div>
                         <div className="text-[10px] text-white/40">{pts2.toLocaleString()} pts</div>
@@ -258,7 +309,9 @@ export default function LeaderboardPage() {
                   return (
                     <div className="flex flex-col items-center gap-1.5 flex-1">
                       <div className="text-sm">👑</div>
-                      <div className={`flex h-14 w-14 items-center justify-center rounded-2xl border-2 text-base font-black ${isMe1 ? "border-emerald-400/60 bg-emerald-500/20 text-emerald-300" : "border-amber-400/60 bg-amber-400/15 text-amber-300"}`}>{initials(name1)}</div>
+                      <AvatarCircle uid={r1.uid} name={name1} size={56}
+                        isMe={isMe1}
+                        colorClass={isMe1 ? "border-emerald-400/60 bg-emerald-500/20 text-emerald-300 text-base" : "border-amber-400/60 bg-amber-400/15 text-amber-300 text-base"} />
                       <div className="text-center">
                         <div className={`text-sm font-black truncate max-w-[80px] ${isMe1 ? "text-emerald-300" : "text-white"}`}>{name1.split(" ")[0]}</div>
                         <div className="text-[11px] font-bold text-amber-300">{pts1.toLocaleString()} pts</div>
@@ -287,7 +340,9 @@ export default function LeaderboardPage() {
                   const isMe3 = user?.uid === r3.uid;
                   return (
                     <div className="flex flex-col items-center gap-1.5 flex-1">
-                      <div className={`flex h-10 w-10 items-center justify-center rounded-2xl border-2 text-xs font-black ${isMe3 ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-300" : "border-orange-400/40 bg-orange-400/10 text-orange-300"}`}>{initials(name3)}</div>
+                      <AvatarCircle uid={r3.uid} name={name3} size={40}
+                        isMe={isMe3}
+                        colorClass={isMe3 ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-300 text-xs" : "border-orange-400/40 bg-orange-400/10 text-orange-300 text-xs"} />
                       <div className="text-center">
                         <div className={`text-xs font-bold truncate max-w-[64px] ${isMe3 ? "text-emerald-300" : "text-white/70"}`}>{name3.split(" ")[0]}</div>
                         <div className="text-[10px] text-white/40">{pts3.toLocaleString()} pts</div>
@@ -363,14 +418,11 @@ export default function LeaderboardPage() {
                       <div className="flex items-center text-white/70 font-semibold text-xs md:text-sm">{medal(rank)}</div>
 
                       <div className="flex items-center gap-2 min-w-0">
-                        <div className={[
-                          "flex h-8 w-8 md:h-9 md:w-9 shrink-0 items-center justify-center rounded-xl border text-xs font-black",
-                          isMe ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-300"
-                               : top3 ? "border-white/15 bg-white/8 text-white/70"
-                               : "border-white/8 bg-white/5 text-white/40",
-                        ].join(" ")}>
-                          {initials(name)}
-                        </div>
+                        <AvatarCircle uid={r.uid} name={name} size={36}
+                          isMe={isMe}
+                          colorClass={isMe ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-300"
+                            : top3 ? "border-white/15 bg-white/8 text-white/70"
+                            : "border-white/8 bg-white/5 text-white/40"} />
                         <div className="min-w-0">
                           <div className={["truncate text-xs md:text-sm font-medium", isMe?"text-emerald-300":"text-white/80"].join(" ")}>{name}</div>
                           <div className="hidden md:block truncate text-xs text-white/35">@{(r.username||name).toLowerCase().replace(/\s+/g,"")}</div>

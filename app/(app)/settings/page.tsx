@@ -8,6 +8,7 @@ import { useUserEntitlements } from "@/lib/useUserEntitlements";
 import { db, auth } from "@/lib/firebase";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { sendPasswordResetEmail, deleteUser } from "firebase/auth";
+import AvatarPicker from "@/components/ui/AvatarPicker";
 
 type Address = {
   line1?: string;
@@ -23,6 +24,7 @@ type UserSettings = {
   displayName?: string;
   username?: string;
   email?: string;
+  avatarUrl?: string | null;
   address?: Address | null;
   preferences?: {
     timezone?: string;
@@ -282,6 +284,7 @@ export default function SettingsPage() {
   const [country, setCountry] = useState("US");
   const [requireShippingForRewards, setRequireShippingForRewards] =
     useState(true);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   const docRef = useMemo(() => (uid ? doc(db, "users", uid) : null), [uid]);
   const hasAnyAddress = useMemo(
@@ -315,6 +318,7 @@ export default function SettingsPage() {
         setRequireShippingForRewards(
           data.preferences?.requireShippingForRewards ?? true,
         );
+        setAvatarUrl((data as any).avatarUrl ?? null);
       } catch (e: any) {
         if (alive) setErr(e?.message || "Failed to load settings.");
       } finally {
@@ -460,29 +464,14 @@ export default function SettingsPage() {
                   subtitle="Basic account info shown across the app."
                 />
 
-                {/* Avatar */}
-                <div className="mt-5 flex items-center gap-4 rounded-xl border border-white/10 bg-black/20 p-4">
-                  <UserAvatar
-                    name={displayName || username}
-                    email={email}
-                    size={64}
+                {/* Avatar Picker */}
+                <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+                  <div className="text-sm font-semibold text-white mb-4">Avatar</div>
+                  <AvatarPicker
+                    uid={uid}
+                    currentUrl={avatarUrl}
+                    onSaved={(url) => setAvatarUrl(url)}
                   />
-                  <div>
-                    <div className="text-sm font-semibold text-white">
-                      {displayName || username || "Your name"}
-                    </div>
-                    <div className="text-xs text-white/45 mt-0.5">{email}</div>
-                    <div className="mt-1.5 flex items-center gap-2">
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${isPremium ? "border-blue-400/30 bg-blue-500/15 text-blue-200" : "border-white/10 bg-white/5 text-white/50"}`}
-                      >
-                        {isPremium ? "✦ PREMIUM" : "FREE"}
-                      </span>
-                      <span className="rounded-full border border-amber-400/20 bg-amber-400/10 px-2 py-0.5 text-[10px] font-bold text-amber-300">
-                        {points.toLocaleString()} RP
-                      </span>
-                    </div>
-                  </div>
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">

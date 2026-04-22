@@ -248,13 +248,146 @@ type NotificationType =
   | "pick_push"
   | "reward_points"
   | "daily_reward"
-  | "leaderboard_reward";
+  | "leaderboard_reward"
+  | "streak_bonus";
 
 function notificationDocId(uid: string, type: string, dedupeKey: string) {
   const safe = String(dedupeKey ?? "")
     .replace(/[^a-zA-Z0-9_-]/g, "_")
     .slice(0, 140);
   return `${uid}_${type}_${safe}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STREAK SYSTEM
+// ─────────────────────────────────────────────────────────────────────────────
+// Rules:
+//   WIN  → streak +1
+//   PUSH → streak unchanged (does not break or increment)
+//   LOSS → streak resets to 0
+//
+// Milestone bonuses (awarded once per streak crossing):
+//   5  consecutive wins → +300 RP
+//   10 consecutive wins → +1000 RP  (also clears the 5-win bonus flag so
+//                                     next 5-streak crossing after this rewards again)
+//
+// Stored in: users/{uid}/streaks/picks  (subcollection)
+// Fields: currentStreak, longestStreak, rewarded5, rewarded10
+// ─────────────────────────────────────────────────────────────────────────────
+
+const STREAK_5_RP  = 300;
+const STREAK_10_RP = 1000;
+
+async function checkAndRewardStreak(uid: string, result: PickResult): Promise<void> {
+  if (!uid) return;
+
+  const streakRef = db.collection("users").doc(uid).collection("streaks").doc("picks");
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(streakRef);
+    const data = snap.exists ? (snap.data() as any) : {};
+
+    let current   = Number(data.currentStreak  ?? 0);
+    let longest   = Number(data.longestStreak  ?? 0);
+    let rewarded5  = Boolean(data.rewarded5  ?? false);
+    let rewarded10 = Boolean(data.rewarded10 ?? false);
+
+    if (result === "win") {
+      current += 1;
+      if (current > longest) longest = current;
+    } else if (result === "loss") {
+      current = 0;
+      rewarded5  = false; // reset flags so next streak can earn again
+      rewarded10 = false;
+    }
+    // push → no change
+
+    // Write updated streak doc
+    tx.set(streakRef, {
+      currentStreak: current,
+      longestStreak: longest,
+      rewarded5,
+      rewarded10,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    // Check milestones (only on wins, only once per crossing)
+    if (result !== "win") return;
+
+    // 10-win milestone
+    if (current >= 10 && !rewarded10) {
+      tx.set(streakRef, { rewarded10: true }, { merge: true });
+
+      const userRef = db.collection("users").doc(uid);
+      tx.set(userRef, {
+        rewardPoints: admin.firestore.FieldValue.increment(STREAK_10_RP),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      // Write reward history + notification outside transaction (after commit)
+      // We schedule it via a promise we don't await inside the tx
+    } else if (current >= 5 && !rewarded5) {
+      // 5-win milestone (only if 10-win not also triggered this tick)
+      tx.set(streakRef, { rewarded5: true }, { merge: true });
+    }
+  });
+
+  // After transaction — check what milestones were just crossed and send notifications
+  // Re-read the streak doc to see what changed
+  const afterSnap = await streakRef.get();
+  const after = afterSnap.exists ? (afterSnap.data() as any) : {};
+  const current = Number(after.currentStreak ?? 0);
+
+  if (result === "win" && current >= 10 && after.rewarded10 === true) {
+    // Was this the exact crossing? Only notify when current is exactly 10 or a multiple of 10
+    if (current % 10 === 0) {
+      await db.collection("users").doc(uid).set(
+        { rewardPoints: admin.firestore.FieldValue.increment(0) }, // no-op to ensure doc exists
+        { merge: true }
+      );
+      await addRewardHistoryAndNotify(
+        uid,
+        "streak_bonus",
+        STREAK_10_RP,
+        `🔥 ${current}-pick win streak! Bonus reward.`,
+        { streakLength: current, milestone: 10 },
+      );
+      // Also update notification to use streak_bonus type
+      await createNotification({
+        uid,
+        type: "streak_bonus",
+        title: `🔥 ${current} picks en racha!`,
+        body: `¡Increíble! Lograste ${current} picks ganadores seguidos. +${STREAK_10_RP} RP bonus.`,
+        dedupeKey: `streak_10_${uid}_${current}`,
+        ctaUrl: "/dashboard",
+        meta: { streakLength: current, rp: STREAK_10_RP },
+      });
+    }
+  } else if (result === "win" && current >= 5 && current < 10 && after.rewarded5 === true) {
+    if (current % 5 === 0) {
+      await addRewardHistoryAndNotify(
+        uid,
+        "streak_bonus",
+        STREAK_5_RP,
+        `🔥 ${current}-pick win streak! Bonus reward.`,
+        { streakLength: current, milestone: 5 },
+      );
+      await createNotification({
+        uid,
+        type: "streak_bonus",
+        title: `🔥 ${current} picks en racha!`,
+        body: `¡Bien hecho! Lograste ${current} picks ganadores seguidos. +${STREAK_5_RP} RP bonus.`,
+        dedupeKey: `streak_5_${uid}_${current}`,
+        ctaUrl: "/dashboard",
+        meta: { streakLength: current, rp: STREAK_5_RP },
+      });
+      // Give the RP
+      await db.collection("users").doc(uid).set(
+        { rewardPoints: admin.firestore.FieldValue.increment(STREAK_5_RP), updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+    }
+  }
 }
 
 function marketLabel(market: string) {
@@ -2512,6 +2645,9 @@ export const onGameWriteResolvePicks = onDocumentWritten(
     for (const item of notificationsToSend) {
       if (!item.uid) continue;
 
+      // ── Streak update ──────────────────────────────────────────────────
+      await checkAndRewardStreak(item.uid, item.result as PickResult);
+
       const type: NotificationType =
         item.result === "win"
           ? "pick_win"
@@ -2557,10 +2693,6 @@ export const onGameWriteResolvePicks = onDocumentWritten(
 );
 
 /** ===== (4b) Resolve DAILY picks when game becomes FINAL ===== *
- * Mirrors onGameWriteResolvePicks but targets picks_daily collection.
- * picks_daily use dayId instead of weekId — everything else is identical.
- */
-export const onGameWriteResolveDailyPicks = onDocumentWritten(
   "games/{docId}",
   async (event) => {
     const after = event.data?.after;
@@ -2667,6 +2799,9 @@ export const onGameWriteResolveDailyPicks = onDocumentWritten(
     // Send notifications (same as weekly)
     for (const item of notificationsToSend) {
       if (!item.uid) continue;
+
+      // ── Streak update ──────────────────────────────────────────────────
+      await checkAndRewardStreak(item.uid, item.result as PickResult);
 
       const type: NotificationType =
         item.result === "win"
@@ -2821,6 +2956,7 @@ export const finalizeWeeklyLeaderboardNBA = onSchedule(
     for (const doc of top10Snap.docs) {
       const uid = (doc.data() as any).uid ?? doc.id;
       const data = doc.data() as any;
+      const rank = top10Snap.docs.indexOf(doc) + 1;
 
       const wins = Number(data.wins ?? 0);
       const pushes = Number(data.pushes ?? 0);
@@ -2830,10 +2966,11 @@ export const finalizeWeeklyLeaderboardNBA = onSchedule(
       const userData = userSnap.data() as any;
 
       const plan = String(userData?.plan ?? "free").toLowerCase();
+      const isPrem = plan === "premium";
 
       let rp = 0;
 
-      if (plan === "premium") {
+      if (isPrem) {
         rp += wins * 10;
         rp += pushes * 3;
       } else {
@@ -2841,12 +2978,16 @@ export const finalizeWeeklyLeaderboardNBA = onSchedule(
         rp += pushes * 1;
       }
 
-      // bonus top10 (FREE: +10, PREMIUM: +20)
-      rp += plan === "premium" ? 20 : 10;
+      // Top 10 bonus (FREE: +10, PREMIUM: +50)
+      rp += isPrem ? 50 : 10;
 
-      // bonus winner — shared if tied on points + win rate
-      if (firstPlaceUids.has(doc.id)) {
-        rp += plan === "premium" ? 200 : 100;
+      // Placement bonuses
+      if (isPrem) {
+        if (rank === 1) rp += 500; // #1 PREMIUM
+        else if (rank === 2) rp += 200; // #2 PREMIUM
+        else if (rank === 3) rp += 100; // #3 PREMIUM
+      } else {
+        if (firstPlaceUids.has(doc.id)) rp += 100; // #1 FREE (unchanged)
       }
 
       await userRef.set(
@@ -2858,17 +2999,19 @@ export const finalizeWeeklyLeaderboardNBA = onSchedule(
       );
 
       if (rp > 0) {
+        const rankLabel = rank === 1 ? " 🏆 #1" : rank === 2 ? " 🥈 #2" : rank === 3 ? " 🥉 #3" : ` Top ${rank}`;
         await addRewardHistoryAndNotify(
           uid,
           "leaderboard_reward",
           rp,
-          `Weekly leaderboard reward for ${weekId}`,
+          `Weekly leaderboard reward — NBA ${weekId}${rankLabel}`,
           {
             weekId,
             sport: "NBA",
             wins,
             pushes,
             plan,
+            rank,
           },
         );
       }
@@ -3252,12 +3395,18 @@ export const adminFinalizeWeeklyRewards = onCall(
         rp += pushes * 1;
       }
 
-      // Bonus top 10
-      // bonus top10 (FREE: +10, PREMIUM: +20)
-      rp += plan === "premium" ? 20 : 10;
-      // Bonus ganador #1 — shared if tied on points + win rate
-      if (firstPlaceUidsAdmin.has(doc.id)) {
-        rp += plan === "premium" ? 200 : 100;
+      // Bonus top 10 (FREE: +10, PREMIUM: +50)
+      const isPrem = plan === "premium";
+      rp += isPrem ? 50 : 10;
+
+      // Placement bonuses
+      const rank = top10Snap.docs.indexOf(doc) + 1;
+      if (isPrem) {
+        if (rank === 1) rp += 500;
+        else if (rank === 2) rp += 200;
+        else if (rank === 3) rp += 100;
+      } else {
+        if (firstPlaceUidsAdmin.has(doc.id)) rp += 100;
       }
 
       await userRef.set(
@@ -5159,6 +5308,7 @@ export const finalizeWeeklyLeaderboardMLB = onSchedule(
     for (const doc of top10Snap.docs) {
       const uid = (doc.data() as any).uid ?? doc.id;
       const data = doc.data() as any;
+      const rank = top10Snap.docs.indexOf(doc) + 1;
 
       const wins = Number(data.wins ?? 0);
       const pushes = Number(data.pushes ?? 0);
@@ -5167,9 +5317,10 @@ export const finalizeWeeklyLeaderboardMLB = onSchedule(
       const userSnap = await userRef.get();
       const userData = userSnap.data() as any;
       const plan = String(userData?.plan ?? "free").toLowerCase();
+      const isPrem = plan === "premium";
 
       let rp = 0;
-      if (plan === "premium") {
+      if (isPrem) {
         rp += wins * 10;
         rp += pushes * 3;
       } else {
@@ -5177,11 +5328,16 @@ export const finalizeWeeklyLeaderboardMLB = onSchedule(
         rp += pushes * 1;
       }
 
-      rp += plan === "premium" ? 20 : 10; // bonus top10 (FREE: +10, PREMIUM: +20)
+      // Top 10 bonus (FREE: +10, PREMIUM: +50)
+      rp += isPrem ? 50 : 10;
 
-      // bonus winner — shared if tied on points + win rate
-      if (firstPlaceUidsMLB.has(doc.id)) {
-        rp += plan === "premium" ? 200 : 100; // bonus winner (FREE: +100, PREMIUM: +200)
+      // Placement bonuses
+      if (isPrem) {
+        if (rank === 1) rp += 500;
+        else if (rank === 2) rp += 200;
+        else if (rank === 3) rp += 100;
+      } else {
+        if (firstPlaceUidsMLB.has(doc.id)) rp += 100;
       }
 
       await userRef.set(
@@ -5193,12 +5349,13 @@ export const finalizeWeeklyLeaderboardMLB = onSchedule(
       );
 
       if (rp > 0) {
+        const rankLabel = rank === 1 ? " 🏆 #1" : rank === 2 ? " 🥈 #2" : rank === 3 ? " 🥉 #3" : ` Top ${rank}`;
         await addRewardHistoryAndNotify(
           uid,
           "leaderboard_reward",
           rp,
-          `Weekly leaderboard reward for ${weekId}`,
-          { weekId, sport: "MLB", wins, pushes, plan },
+          `Weekly leaderboard reward — MLB ${weekId}${rankLabel}`,
+          { weekId, sport: "MLB", wins, pushes, plan, rank },
         );
       }
     }
@@ -5674,8 +5831,8 @@ export const adminBackfillDailyPicks = onCall({ cors: true }, async (req) => {
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Daily RP reward structure (separate from weekly):
-//   FREE:    wins × 1 RP  + pushes × 0 RP + 3 RP bonus top10 + 50 RP bonus #1
-//   PREMIUM: wins × 5 RP  + pushes × 1 RP + 5 RP bonus top10 + 50 RP bonus #1
+//   FREE:    wins × 1 RP  + pushes × 0 RP + 3 RP bonus top10 + 25 RP bonus #1
+//   PREMIUM: wins × 5 RP  + pushes × 1 RP + 25 RP bonus top10 + 100 RP #1 / 50 RP #2 / 25 RP #3
 //
 // Runs every night at 11:55 PM Puerto Rico time for both NBA and MLB.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5683,11 +5840,13 @@ export const adminBackfillDailyPicks = onCall({ cors: true }, async (req) => {
 const DAILY_RP_FREE_WIN = 1;
 const DAILY_RP_FREE_PUSH = 0;
 const DAILY_RP_FREE_TOP10 = 3;
-const DAILY_RP_FREE_WINNER = 25; // #1 bonus FREE
+const DAILY_RP_FREE_WINNER = 25;   // #1 bonus FREE (unchanged)
 const DAILY_RP_PREM_WIN = 5;
 const DAILY_RP_PREM_PUSH = 1;
-const DAILY_RP_PREM_TOP10 = 5;
-const DAILY_RP_PREM_WINNER = 50; // #1 bonus PREMIUM
+const DAILY_RP_PREM_TOP10 = 25;    // Top 10 bonus PREMIUM (5 → 25)
+const DAILY_RP_PREM_WINNER  = 100; // #1 bonus PREMIUM (50 → 100)
+const DAILY_RP_PREM_SECOND  = 50;  // #2 bonus PREMIUM (new)
+const DAILY_RP_PREM_THIRD   = 25;  // #3 bonus PREMIUM (new)
 
 async function runFinalizeDailyLeaderboard(dayId: string, sport: Sport) {
   console.log(`[finalizeDailyLeaderboard] START dayId=${dayId} sport=${sport}`);
@@ -5838,9 +5997,16 @@ async function runFinalizeDailyLeaderboard(dayId: string, sport: Sport) {
     // Top 10 bonus
     rp += isPremium ? DAILY_RP_PREM_TOP10 : DAILY_RP_FREE_TOP10;
 
-    // #1 winner bonus (same for both plans)
-    const isWinner = player.uid === winner.uid;
-    if (isWinner) rp += isPremium ? DAILY_RP_PREM_WINNER : DAILY_RP_FREE_WINNER;
+    // Placement bonuses — PREMIUM only gets #1/#2/#3
+    const rank = i + 1;
+    if (isPremium) {
+      if (rank === 1) rp += DAILY_RP_PREM_WINNER;
+      else if (rank === 2) rp += DAILY_RP_PREM_SECOND;
+      else if (rank === 3) rp += DAILY_RP_PREM_THIRD;
+    } else {
+      // FREE: only #1 gets winner bonus
+      if (player.uid === winner.uid) rp += DAILY_RP_FREE_WINNER;
+    }
 
     if (rp <= 0) continue;
 
@@ -5852,19 +6018,20 @@ async function runFinalizeDailyLeaderboard(dayId: string, sport: Sport) {
       { merge: true },
     );
 
+    const rankLabel = rank === 1 ? " 🏆 #1 Winner" : rank === 2 ? " 🥈 #2 Place" : rank === 3 ? " 🥉 #3 Place" : ` — Top ${rank}`;
     await addRewardHistoryAndNotify(
       player.uid,
       "leaderboard_reward",
       rp,
-      `Daily leaderboard reward — ${dayId} (${sport})${isWinner ? " 🏆 #1 Winner" : ` — Top ${i + 1}`}`,
+      `Daily leaderboard reward — ${dayId} (${sport})${rankLabel}`,
       {
         dayId,
         sport,
         wins: player.wins,
         pushes: player.pushes,
         points: player.points,
-        rank: i + 1,
-        isWinner,
+        rank,
+        isWinner: rank === 1,
         plan,
       },
     );
@@ -6920,6 +7087,7 @@ export const finalizeWeeklyLeaderboardSOCCER = onSchedule(
     for (const doc of top10Snap.docs) {
       const uid = (doc.data() as any).uid ?? doc.id;
       const data = doc.data() as any;
+      const rank = top10Snap.docs.indexOf(doc) + 1;
 
       const wins = Number(data.wins ?? 0);
       const pushes = Number(data.pushes ?? 0);
@@ -6929,10 +7097,11 @@ export const finalizeWeeklyLeaderboardSOCCER = onSchedule(
       const userData = userSnap.data() as any;
 
       const plan = String(userData?.plan ?? "free").toLowerCase();
+      const isPrem = plan === "premium";
 
       let rp = 0;
 
-      if (plan === "premium") {
+      if (isPrem) {
         rp += wins * 10;
         rp += pushes * 3;
       } else {
@@ -6940,12 +7109,16 @@ export const finalizeWeeklyLeaderboardSOCCER = onSchedule(
         rp += pushes * 1;
       }
 
-      // bonus top10 (FREE: +10, PREMIUM: +20)
-      rp += plan === "premium" ? 20 : 10;
+      // Top 10 bonus (FREE: +10, PREMIUM: +50)
+      rp += isPrem ? 50 : 10;
 
-      // bonus winner — shared if tied on points + win rate
-      if (firstPlaceUidsSOCCER.has(doc.id)) {
-        rp += plan === "premium" ? 200 : 100;
+      // Placement bonuses
+      if (isPrem) {
+        if (rank === 1) rp += 500;
+        else if (rank === 2) rp += 200;
+        else if (rank === 3) rp += 100;
+      } else {
+        if (firstPlaceUidsSOCCER.has(doc.id)) rp += 100;
       }
 
       await userRef.set(
@@ -6957,17 +7130,19 @@ export const finalizeWeeklyLeaderboardSOCCER = onSchedule(
       );
 
       if (rp > 0) {
+        const rankLabel = rank === 1 ? " 🏆 #1" : rank === 2 ? " 🥈 #2" : rank === 3 ? " 🥉 #3" : ` Top ${rank}`;
         await addRewardHistoryAndNotify(
           uid,
           "leaderboard_reward",
           rp,
-          `Weekly leaderboard reward for ${weekId}`,
+          `Weekly leaderboard reward — SOCCER ${weekId}${rankLabel}`,
           {
             weekId,
             sport: "SOCCER",
             wins,
             pushes,
             plan,
+            rank,
           },
         );
       }
@@ -7259,7 +7434,7 @@ async function runFinalizeMLBPropsRewards(weekId: string, force = false) {
   }
 
   // Apply tiebreaker
-  const { sorted, firstPlaceUids } = resolveWinners(entriesSnap.docs);
+  const { sorted } = resolveWinners(entriesSnap.docs);
   const top10 = sorted.slice(0, 10);
   let rewarded = 0;
 
@@ -7267,6 +7442,7 @@ async function runFinalizeMLBPropsRewards(weekId: string, force = false) {
     const data = doc.data() as any;
     const uid  = String(data.uid ?? doc.id).trim();
     if (!uid) continue;
+    const rank = top10.indexOf(doc) + 1;
 
     const wins   = Number(data.wins   ?? 0);
     const pushes = Number(data.pushes ?? 0);
@@ -7279,11 +7455,12 @@ async function runFinalizeMLBPropsRewards(weekId: string, force = false) {
     let rp = 0;
     rp += wins   * 10;
     rp += pushes * 3;
-    rp += 20; // top10 bonus premium
+    rp += 50; // top10 bonus premium (20 → 50)
 
-    if (firstPlaceUids.has(doc.id)) {
-      rp += 200; // winner bonus premium
-    }
+    // Placement bonuses premium
+    if (rank === 1) rp += 500;
+    else if (rank === 2) rp += 200;
+    else if (rank === 3) rp += 100;
 
     await userRef.set(
       {

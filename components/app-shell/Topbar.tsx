@@ -381,6 +381,8 @@ export default function Topbar({
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [open, setOpen] = useState(false);
+  const [firestoreUsername, setFirestoreUsername] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const { plan, rewardPoints, loading } = useUserEntitlements();
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -388,6 +390,19 @@ export default function Topbar({
     const unsub = onAuthStateChanged(auth, (u) => setUser(u));
     return () => unsub();
   }, []);
+
+  // Read username + avatarUrl from Firestore in one listener
+  useEffect(() => {
+    if (!user?.uid) { setFirestoreUsername(null); setAvatarUrl(null); return; }
+    const unsub = onSnapshot(doc(db, "users", user.uid), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data() as any;
+        setFirestoreUsername(data?.username ?? null);
+        setAvatarUrl(data?.avatarUrl ?? null);
+      }
+    });
+    return () => unsub();
+  }, [user?.uid]);
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
@@ -400,8 +415,8 @@ export default function Topbar({
 
   const username = useMemo(() => {
     if (!user) return "Account";
-    return user.displayName || user.email?.split("@")[0] || "Account";
-  }, [user]);
+    return firestoreUsername || user.displayName || user.email?.split("@")[0] || "Account";
+  }, [user, firestoreUsername]);
 
   async function handleLogout() {
     await signOut(auth);
@@ -411,7 +426,7 @@ export default function Topbar({
   const isPremium = plan === "premium";
 
   return (
-    <header className="sticky top-0 z-40 h-14 border-b border-white/[0.07] bg-[#09090B]/95 backdrop-blur-xl">
+    <header className="sticky top-0 z-50 h-14 border-b border-white/[0.07] bg-[#09090B]/95 backdrop-blur-xl">
       <div className="flex h-full items-center justify-between gap-3 px-4 md:px-5">
         {/* Left — menu + title */}
         <div className="flex min-w-0 items-center gap-3">
@@ -493,17 +508,21 @@ export default function Topbar({
             <button
               onClick={() => setOpen((v) => !v)}
               className={cn(
-                "flex h-7 items-center gap-2 rounded-full border px-2.5 transition",
+                "flex h-9 items-center gap-2 rounded-full border pl-1 pr-2.5 transition",
                 open
                   ? "border-white/20 bg-white/10 text-white"
                   : "border-white/10 bg-white/5 text-white/70 hover:text-white hover:border-white/15",
               )}
               aria-label="User menu"
             >
-              {/* Avatar circle */}
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-violet-600 text-[9px] font-black text-white flex-shrink-0">
-                {username.slice(0, 1).toUpperCase()}
-              </span>
+              {/* Avatar */}
+              {avatarUrl ? (
+                <img src={avatarUrl} alt={username} className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
+              ) : (
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600/80 text-[11px] font-bold text-white flex-shrink-0">
+                  {username.slice(0, 1).toUpperCase()}
+                </span>
+              )}
               <span className="hidden max-w-[120px] truncate text-xs font-medium sm:inline">
                 {username}
               </span>
@@ -521,16 +540,20 @@ export default function Topbar({
             </button>
 
             {open && (
-              <div className="absolute right-0 z-50 mt-2 w-52 overflow-hidden rounded-2xl border border-white/10 bg-[#0E1117] shadow-2xl shadow-black/60">
+              <div className="absolute right-0 z-[60] mt-2 w-52 overflow-hidden rounded-2xl border border-white/10 bg-[#0E1117] shadow-2xl shadow-black/60">
                 {/* User info */}
                 <div className="border-b border-white/8 px-4 py-3">
                   <div className="flex items-center gap-2.5 mb-1">
-                    <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-violet-600 text-xs font-black text-white">
-                      {username.slice(0, 1).toUpperCase()}
-                    </span>
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt={username} className="w-10 h-10 rounded-full object-cover flex-shrink-0 ring-2 ring-blue-500/40" />
+                    ) : (
+                      <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-blue-600/80 text-sm font-bold text-white">
+                        {username.slice(0, 1).toUpperCase()}
+                      </span>
+                    )}
                     <div className="min-w-0">
                       <div className="truncate text-sm font-semibold text-white">
-                        {user?.displayName || username}
+                        @{username}
                       </div>
                       <div className="truncate text-[10px] text-white/40">
                         {user?.email || ""}

@@ -9,7 +9,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { getApp } from "firebase/app";
 
 type Market = "ALL" | "ML" | "SPREAD" | "OU";
-type Sport = "NBA" | "MLB";
+type Sport = "NBA" | "MLB" | "SOCCER";
 
 type LeaderRow = {
   id: string; uid: string; username?: string; displayName?: string;
@@ -19,7 +19,7 @@ type LeaderRow = {
   pointsOU?: number; winsOU?: number; lossesOU?: number; pushesOU?: number; picksOU?: number;
 };
 
-const SPORT: Sport = "MLB";
+const SPORT: Sport = "SOCCER";
 
 function initials(name?: string) {
   const s = (name ?? "?").trim();
@@ -124,8 +124,8 @@ export default function LeaderboardPage() {
                 <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-white/60">
                   Week {weekId}
                 </span>
-                <span className="rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 text-xs font-semibold text-blue-300">
-                  {SPORT}
+                <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300">
+                  ⚽ {SPORT}
                 </span>
                 <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${mc.border} ${mc.activeBg} ${mc.color}`}>
                   {mc.label}
@@ -163,13 +163,13 @@ export default function LeaderboardPage() {
                 className="px-4 py-2 text-sm text-white/55 hover:bg-white/5 hover:text-white/90 transition border-r border-white/8">
                 NBA
               </Link>
-              <span className="px-4 py-2 text-sm font-semibold text-red-300 bg-red-500/10 cursor-default border-r border-white/8">
+              <Link href="/leaderboard/mlb"
+                className="px-4 py-2 text-sm text-white/55 hover:bg-white/5 hover:text-white/90 transition border-r border-white/8">
                 MLB
-              </span>
-              <Link href="/leaderboard/soccer"
-                className="px-4 py-2 text-sm text-white/55 hover:bg-white/5 hover:text-white/90 transition">
-                ⚽ Soccer
               </Link>
+              <span className="px-4 py-2 text-sm font-semibold text-emerald-300 bg-emerald-500/10 cursor-default">
+                ⚽ Soccer
+              </span>
             </div>
             <Link href="/leaderboard/daily"
               className="ml-auto flex items-center gap-1.5 rounded-xl border border-amber-400/20 bg-amber-400/8 px-4 py-2 text-sm font-semibold text-amber-300/80 hover:bg-amber-400/12 transition">
@@ -336,7 +336,7 @@ export default function LeaderboardPage() {
                 <div className="text-lg font-semibold">No rankings yet</div>
                 <div className="mt-1 text-white/60 text-sm">Points appear after resolved picks exist for this week.</div>
                 <div className="mt-4">
-                  <Link href="/tournaments/nba" className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-sm text-white hover:bg-white/15 transition">
+                  <Link href="/tournaments/soccer" className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-sm text-white hover:bg-white/15 transition">
                     Make picks
                   </Link>
                 </div>

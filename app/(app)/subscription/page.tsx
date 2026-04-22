@@ -426,15 +426,43 @@ export default function SubscriptionPage() {
                 </Row>
                 <Row>
                   Top 10 bonus →{" "}
-                  <span className="text-amber-300 font-semibold">+5 RP</span>
+                  <span className="text-amber-300 font-semibold">+25 RP</span>
                 </Row>
                 <Row>
-                  Daily #1 →{" "}
-                  <span className="text-amber-300 font-semibold">+50 RP</span> +{" "}
+                  Daily winner #1 →{" "}
+                  <span className="text-amber-300 font-semibold">+100 RP</span> +{" "}
                   <span className="text-emerald-300 font-semibold">
-                    $25 cash 💵
+                    $
+                   💵
                   </span>
                 </Row>
+
+<Row>
+                Daily winner #2 →{" "}
+                  <span className="text-amber-300 font-semibold">+50 RP</span> +{" "}
+                  <span className="text-emerald-300 font-semibold">
+                    $
+                   💵
+                  </span>
+                </Row>
+
+                <Row>
+                  Daily winner #3 →{" "}
+                  <span className="text-amber-300 font-semibold">+25 RP</span> +{" "}
+                  <span className="text-emerald-300 font-semibold">
+                    $
+                   💵
+                  </span>
+                </Row>
+
+
+
+
+
+
+
+
+
 
                 <SectionLabel>Scoring — Weekly</SectionLabel>
                 <Row>
@@ -448,29 +476,29 @@ export default function SubscriptionPage() {
                 </Row>
                 <Row>
                   Top 10 bonus →{" "}
-                  <span className="text-amber-300 font-semibold">+20 RP</span>
+                  <span className="text-amber-300 font-semibold">+50 RP</span>
                 </Row>
                 <Row>
-                  Weekly #1 →{" "}
+                  Winner #1 →{" "}
+                  <span className="text-amber-300 font-semibold">+500 RP</span>{" "}
+                  +{" "}
+                  <span className="text-emerald-300 font-semibold">
+                    $ 💵
+                  </span>
+                </Row>
+                <Row>
+                  Winner #2 →{" "}
                   <span className="text-amber-300 font-semibold">+200 RP</span>{" "}
                   +{" "}
                   <span className="text-emerald-300 font-semibold">
-                    $100 cash 💵
+                    $ 💵
                   </span>
                 </Row>
                 <Row>
-                  Weekly #2 →{" "}
-                  <span className="text-amber-300 font-semibold">+100 RP</span>{" "}
-                  +{" "}
+                  Winner #3 →{" "}
+                  <span className="text-amber-300 font-semibold">+100 RP</span> +{" "}
                   <span className="text-emerald-300 font-semibold">
-                    $50 cash 💵
-                  </span>
-                </Row>
-                <Row>
-                  Weekly #3 →{" "}
-                  <span className="text-amber-300 font-semibold">+50 RP</span> +{" "}
-                  <span className="text-emerald-300 font-semibold">
-                    $25 cash 💵
+                    $ 💵
                   </span>
                 </Row>
 
