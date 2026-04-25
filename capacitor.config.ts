@@ -8,6 +8,9 @@ const config: CapacitorConfig = {
     url: "https://stat2win.vercel.app",
     cleartext: true,
   },
+  ios: {
+    contentInset: "always",
+  },
 };
 
 export default config;

@@ -48,3 +48,9 @@ body > * {
   font-size: 0.75rem;
   color: rgba(255, 255, 255, 0.75);
 }
+
+html, body {
+  overflow-x: hidden;
+  width: 100%;
+  max-width: 100vw;
+}
