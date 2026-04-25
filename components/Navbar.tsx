@@ -59,7 +59,7 @@ export default function Navbar() {
   }
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-black/60 backdrop-blur">
+    <header className="sticky z-50 border-b border-white/10 bg-black/60 backdrop-blur" style={{ top: 'env(safe-area-inset-top)' }}>
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
         <Link href="/" className="flex items-center gap-2">
           <span className="text-sm font-semibold tracking-tight text-white">
