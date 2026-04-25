@@ -426,7 +426,8 @@ export default function Topbar({
   const isPremium = plan === "premium";
 
   return (
-    <header className="sticky top-0 z-50 h-14 border-b border-white/[0.07] bg-[#09090B]/95 backdrop-blur-xl">
+    <header className="sticky top-0 z-50 border-b border-white/[0.07] bg-[#09090B]/95 backdrop-blur-xl" style={{ paddingTop: 'env(safe-area-inset-top)', top: 'env(safe-area-inset-top)' }}>
+  <div style={{ height: '56px' }} className="flex items-center justify-between gap-3 px-4 md:px-5">
       <div className="flex h-full items-center justify-between gap-3 px-4 md:px-5">
         {/* Left — menu + title */}
         <div className="flex min-w-0 items-center gap-3">
@@ -764,6 +765,7 @@ export default function Topbar({
             )}
           </div>
         </div>
+      </div>
       </div>
     </header>
   );
