@@ -44,14 +44,12 @@ export default function Navbar() {
     return () => unsub();
   }, []);
 
-  // Close menu when route changes
   const pathname = usePathname();
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
 
   const isLoggedIn = !!user;
-
   const rightCtaHref = useMemo(() => (isLoggedIn ? "/dashboard" : "/login"), [isLoggedIn]);
   const rightCtaLabel = useMemo(() => (isLoggedIn ? "Dashboard" : "Start Playing"), [isLoggedIn]);
 
@@ -61,21 +59,18 @@ export default function Navbar() {
   }
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-black/60 backdrop-blur">
+    <header className="sticky top-0 z-50 border-b border-white/10 bg-black/60 backdrop-blur pt-12">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-        {/* Brand */}
         <Link href="/" className="flex items-center gap-2">
           <span className="text-sm font-semibold tracking-tight text-white">
             Stat<span className="text-blue-400">2</span>Win
           </span>
         </Link>
 
-        {/* Desktop nav */}
         <nav className="hidden items-center gap-2 md:flex">
           <NavItem href="/dashboard" label="Dashboard" />
           <NavItem href="/tournaments" label="Tournaments" />
           <NavItem href="/leaderboard" label="Leaderboard" />
-          {/* If you have admin route */}
           <NavItem href="/admin/games" label="Admin" />
 
           {!isLoggedIn ? (
@@ -102,7 +97,6 @@ export default function Navbar() {
           </Link>
         </nav>
 
-        {/* Mobile: hamburger */}
         <div className="flex items-center gap-2 md:hidden">
           <Link
             href={rightCtaHref}
@@ -117,7 +111,6 @@ export default function Navbar() {
             aria-label="Open menu"
             className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/90 transition hover:border-white/20 hover:bg-white/10"
           >
-            {/* simple hamburger icon */}
             <span className="relative block h-4 w-4">
               <span className="absolute left-0 top-0 block h-[2px] w-4 rounded bg-white/90" />
               <span className="absolute left-0 top-[6px] block h-[2px] w-4 rounded bg-white/90" />
@@ -127,7 +120,6 @@ export default function Navbar() {
         </div>
       </div>
 
-      {/* Mobile dropdown */}
       {open ? (
         <div className="border-t border-white/10 bg-black/80 backdrop-blur md:hidden">
           <div className="mx-auto max-w-6xl px-4 py-3">
@@ -136,9 +128,7 @@ export default function Navbar() {
               <NavItem href="/tournaments" label="Tournaments" onClick={() => setOpen(false)} />
               <NavItem href="/leaderboard" label="Leaderboard" onClick={() => setOpen(false)} />
               <NavItem href="/admin/games" label="Admin" onClick={() => setOpen(false)} />
-
               <div className="my-2 border-t border-white/10" />
-
               {!isLoggedIn ? (
                 <NavItem href="/login" label="Login" onClick={() => setOpen(false)} />
               ) : (
@@ -149,7 +139,6 @@ export default function Navbar() {
                   Logout
                 </button>
               )}
-
               <NavItem href="/subscribe" label="Subscribe" onClick={() => setOpen(false)} />
             </div>
           </div>

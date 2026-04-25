@@ -1,5 +1,6 @@
 import "./globals.css";
 import Providers from "./providers";
+import SafeAreaProvider from "@/components/SafeAreaProvider";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -8,7 +9,7 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "black",
     title: "Stat2Win",
   },
   icons: {
@@ -25,19 +26,20 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta
-          name="apple-mobile-web-app-status-bar-style"
-          content="black-translucent"
-        />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black" />
         <meta name="apple-mobile-web-app-title" content="Stat2Win" />
-        <meta name="theme-color" content="#0d0f12" />
+        <meta name="theme-color" content="#05070B" />
         <link rel="apple-touch-icon" href="/icon-512.png" />
         <link rel="manifest" href="/manifest.json" />
       </head>
       <body>
-        <Providers>{children}</Providers>
+        <Providers>
+          <SafeAreaProvider />
+          {children}
+        </Providers>
       </body>
     </html>
   );

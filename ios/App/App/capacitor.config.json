@@ -6,5 +6,7 @@
 		"url": "https://stat2win.vercel.app",
 		"cleartext": true
 	},
-	"packageClassList": []
+	"packageClassList": [
+		"StatusBarPlugin"
+	]
 }
