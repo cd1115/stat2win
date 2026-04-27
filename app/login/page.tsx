@@ -23,12 +23,6 @@ function LoginPageInner() {
   const fromLogout = searchParams.get("from") === "logout";
   const nextParam = searchParams.get("next");
 
-  useEffect(() => {
-    if (!fromLogout) return;
-    const t = setTimeout(() => router.replace("/login"), 10000);
-    return () => clearTimeout(t);
-  }, [fromLogout, router]);
-
   const [user, setUser] = useState<User | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -37,6 +31,20 @@ function LoginPageInner() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [checking, setChecking] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+
+  // Reset viewport zoom on iOS
+  useEffect(() => {
+    const viewport = document.querySelector('meta[name="viewport"]');
+    if (viewport) {
+      viewport.setAttribute('content', 'width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!fromLogout) return;
+    const t = setTimeout(() => router.replace("/login"), 10000);
+    return () => clearTimeout(t);
+  }, [fromLogout, router]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -148,7 +156,6 @@ function LoginPageInner() {
           {/* Card */}
           <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-xl shadow-[0_0_80px_-20px_rgba(59,130,246,0.2)]">
 
-            {/* Logout notice */}
             {fromLogout && (
               <div className="mb-5 rounded-2xl border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-200 flex items-center gap-2">
                 <span>✓</span>
@@ -156,7 +163,6 @@ function LoginPageInner() {
               </div>
             )}
 
-            {/* Error */}
             {err && (
               <div className="mb-5 rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-200 flex items-start gap-2">
                 <span className="flex-shrink-0 mt-0.5">⚠</span>
@@ -184,7 +190,6 @@ function LoginPageInner() {
               Continuar con Google
             </button>
 
-            {/* Divider */}
             <div className="flex items-center gap-3 mb-4">
               <div className="flex-1 h-px bg-white/8" />
               <span className="text-[11px] text-white/25">o con email</span>
@@ -192,7 +197,6 @@ function LoginPageInner() {
             </div>
 
             <form onSubmit={handleLogin} className="space-y-3">
-              {/* Email */}
               <div>
                 <label className="text-[11px] font-semibold text-white/40 uppercase tracking-wider block mb-1.5">
                   Email
@@ -208,7 +212,6 @@ function LoginPageInner() {
                 />
               </div>
 
-              {/* Password */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">
@@ -239,7 +242,6 @@ function LoginPageInner() {
                 </div>
               </div>
 
-              {/* Submit */}
               <button
                 type="submit"
                 disabled={loading}
@@ -254,7 +256,6 @@ function LoginPageInner() {
               </button>
             </form>
 
-            {/* Sign up */}
             <Link
               href="/signup"
               className="flex items-center justify-center gap-1.5 w-full h-12 rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/6 hover:border-white/15 transition text-sm text-white/60 hover:text-white font-medium mt-3"
@@ -267,7 +268,6 @@ function LoginPageInner() {
             </Link>
           </div>
 
-          {/* Stats row */}
           <div className="flex items-center justify-center gap-6 mt-6">
             {[["100 pts", "per correct pick"], ["Daily", "tournaments"], ["$100", "weekly prize"]].map(([v, l]) => (
               <div key={l} className="text-center">
