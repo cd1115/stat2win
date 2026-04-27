@@ -9,7 +9,5 @@
 	"ios": {
 		"contentInset": "always"
 	},
-	"packageClassList": [
-		"StatusBarPlugin"
-	]
+	"packageClassList": []
 }
