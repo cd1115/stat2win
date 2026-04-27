@@ -51,7 +51,7 @@ const tabs = [
     match: ["/leaderboard"],
   },
   {
-    href: "/redeems",
+    href: "/settings",
     label: "Profile",
     icon: (active: boolean) => (
       <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
