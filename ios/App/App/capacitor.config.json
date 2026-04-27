@@ -7,7 +7,9 @@
 		"cleartext": true
 	},
 	"ios": {
-		"contentInset": "always"
+		"contentInset": "always",
+		"allowsLinkPreview": false,
+		"scrollEnabled": true
 	},
 	"packageClassList": []
 }
