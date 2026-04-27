@@ -635,7 +635,7 @@ export default function DashboardPage() {
 
   return (
     <Protected>
-      <div className="mx-auto max-w-6xl px-4 md:px-6 py-8">
+      <div className="mx-auto max-w-6xl px-4 md:px-6 py-8 overflow-x-hidden">
 
         {/* Header */}
         <div className="mb-6 flex items-start justify-between gap-4">

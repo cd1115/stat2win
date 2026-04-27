@@ -24,7 +24,7 @@ function titleFromPath(pathname: string) {
 
 const MemoMain = memo(function MemoMain({ children }: { children: React.ReactNode }) {
   return (
-    <main className="flex-1 min-h-0 overflow-y-auto pb-24 md:pb-6">
+   <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pb-24 md:pb-6">
       <div className="mx-auto w-full max-w-7xl px-4 md:px-6 py-6">
         {children}
       </div>
