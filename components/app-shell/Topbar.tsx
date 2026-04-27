@@ -311,7 +311,7 @@ export default function Topbar({ title = "Home" }: { title?: string }) {
             </button>
 
             {open && (
-              <div className="absolute right-0 z-[60] mt-2 w-56 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-white/10 bg-[#0E1117] shadow-2xl shadow-black/60">
+              <div className="absolute right-0 z-[60] mt-2 w-52 overflow-hidden rounded-2xl border border-white/10 bg-[#0E1117] shadow-2xl shadow-black/60" style={{maxWidth: 'calc(100vw - 1rem)', right: 0}}>
 
                 {/* User info */}
                 <div className="px-4 py-4 border-b border-white/8">
