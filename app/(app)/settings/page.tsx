@@ -133,7 +133,7 @@ export default function ProfilePage() {
       {/* ── Menu ── */}
       <div className="rounded-2xl border border-white/10 bg-[#0f1218] overflow-hidden">
         {[
-          { label: "Account Settings", sub: "Edit profile, avatar, address", href: "/settings", icon: "⚙️" },
+          { label: "Settings", sub: "Edit profile, avatar, address", href: "/settings", icon: "⚙️" },
           { label: "Subscription", sub: isPremium ? "Premium — active" : "Upgrade to Premium", href: "/subscription", icon: "⭐" },
           { label: "Store", sub: "Redeem your RP for rewards", href: "/store", icon: "🛒" },
         ].map(({ label, sub, href, icon }, i, arr) => (
