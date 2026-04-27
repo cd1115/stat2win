@@ -60,7 +60,6 @@ function timeAgo(ts: any): string {
   }
 }
 
-// Sport accent colors
 const SPORT_COLOR: Record<string, string> = {
   NBA: "#3B82F6",
   MLB: "#38BDF8",
@@ -68,7 +67,6 @@ const SPORT_COLOR: Record<string, string> = {
   NFL: "#F59E0B",
 };
 
-// Result icon + color
 function ResultIcon({ type }: { type: NotifType }) {
   if (type === "pick_win")
     return <span className="text-emerald-400 text-base">✓</span>;
@@ -93,10 +91,9 @@ function NotifDot({ sport }: { sport?: string }) {
   );
 }
 
-// Team logo + abbr badge
 const TEAM_LOGO_BASE: Record<string, string> = {
-  NBA: "/teams", // public/teams/BOS.png, PHX.png etc.
-  MLB: "/teams/mlb", // public/teams/mlb/NYM.png etc.
+  NBA: "/teams",
+  MLB: "/teams/mlb",
   SOCCER: "/teams/soccer",
   NFL: "/teams/nfl",
 };
@@ -171,7 +168,6 @@ function NotificationBell({ uid }: { uid: string }) {
   }
 
   async function markOne(id: string) {
-    (await writeBatch(db).update) ? null : null;
     const batch = writeBatch(db);
     batch.update(doc(db, "notifications", id), { read: true });
     await batch.commit();
@@ -179,7 +175,6 @@ function NotificationBell({ uid }: { uid: string }) {
 
   return (
     <div ref={panelRef} className="relative">
-      {/* Bell button */}
       <button
         onClick={() => {
           setOpen((v) => !v);
@@ -213,15 +208,11 @@ function NotificationBell({ uid }: { uid: string }) {
         )}
       </button>
 
-      {/* Panel */}
       {open && (
         <div className="absolute right-0 top-12 z-50 w-80 rounded-2xl border border-white/10 bg-[#0E1117] shadow-2xl shadow-black/60 overflow-hidden">
-          {/* Header */}
           <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
             <div>
-              <span className="text-sm font-bold text-white">
-                Notifications
-              </span>
+              <span className="text-sm font-bold text-white">Notifications</span>
               {unread > 0 && (
                 <span className="ml-2 rounded-full bg-red-500/20 border border-red-500/30 px-1.5 py-0.5 text-[10px] font-bold text-red-400">
                   {unread} new
@@ -238,7 +229,6 @@ function NotificationBell({ uid }: { uid: string }) {
             )}
           </div>
 
-          {/* List */}
           <div className="max-h-[420px] overflow-y-auto divide-y divide-white/[0.05]">
             {notifs.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-white/25">
@@ -277,7 +267,6 @@ function NotificationBell({ uid }: { uid: string }) {
                         : "hover:bg-white/[0.02]",
                     )}
                   >
-                    {/* Unread indicator */}
                     {!n.read && (
                       <span
                         className="absolute left-0 top-0 bottom-0 w-0.5 rounded-r"
@@ -285,7 +274,6 @@ function NotificationBell({ uid }: { uid: string }) {
                       />
                     )}
 
-                    {/* Icon */}
                     <div
                       className={cn(
                         "flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl border",
@@ -303,7 +291,6 @@ function NotificationBell({ uid }: { uid: string }) {
                       <ResultIcon type={n.type} />
                     </div>
 
-                    {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2 mb-0.5">
                         <span
@@ -325,7 +312,6 @@ function NotificationBell({ uid }: { uid: string }) {
                         </span>
                       </div>
 
-                      {/* Team badges */}
                       {(home || away) && (
                         <div className="flex items-center gap-1 mb-1">
                           {away && <TeamLogo team={away} sport={sport} />}
@@ -340,7 +326,6 @@ function NotificationBell({ uid }: { uid: string }) {
                         {n.body}
                       </p>
 
-                      {/* Points badge */}
                       {pts != null && pts > 0 && (
                         <span className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-amber-400/20 bg-amber-400/8 px-2 py-0.5 text-[10px] font-bold text-amber-300">
                           +{pts} pts
@@ -353,7 +338,6 @@ function NotificationBell({ uid }: { uid: string }) {
             )}
           </div>
 
-          {/* Footer */}
           <div className="border-t border-white/8 px-4 py-2.5">
             <span className="text-[10px] text-white/20">
               {notifs.length} notification{notifs.length !== 1 ? "s" : ""}
@@ -368,15 +352,9 @@ function NotificationBell({ uid }: { uid: string }) {
 // ─── Topbar ───────────────────────────────────────────────────────────────────
 
 export default function Topbar({
-  onMenu,
-  title = "Dashboard",
-  picksOpen = false,
-  onPicksToggle,
+  title = "Home",
 }: {
-  onMenu: () => void;
   title?: string;
-  picksOpen?: boolean;
-  onPicksToggle?: () => void;
 }) {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
@@ -391,7 +369,6 @@ export default function Topbar({
     return () => unsub();
   }, []);
 
-  // Read username + avatarUrl from Firestore in one listener
   useEffect(() => {
     if (!user?.uid) { setFirestoreUsername(null); setAvatarUrl(null); return; }
     const unsub = onSnapshot(doc(db, "users", user.uid), (snap) => {
@@ -426,39 +403,22 @@ export default function Topbar({
   const isPremium = plan === "premium";
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/[0.07] bg-[#09090B]/95 backdrop-blur-xl" style={{ paddingTop: 'env(safe-area-inset-top)', top: 'env(safe-area-inset-top)' }}>
-  <div style={{ height: '56px' }} className="flex items-center justify-between gap-3 px-4 md:px-5">
-      <div className="flex h-full items-center justify-between gap-3 px-4 md:px-5">
-        {/* Left — menu + title */}
-        <div className="flex min-w-0 items-center gap-3">
-          <button
-            onClick={onMenu}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-white/60 hover:text-white transition md:hidden"
-            aria-label="Open menu"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-            >
-              <line x1="3" y1="6" x2="21" y2="6" />
-              <line x1="3" y1="12" x2="21" y2="12" />
-              <line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
-          </button>
-          <h1 className="truncate text-[15px] font-semibold tracking-tight text-white/90">
-            {title}
-          </h1>
-        </div>
+    <header
+      className="sticky top-0 z-50 border-b border-white/[0.07] bg-[#09090B]/95 backdrop-blur-xl"
+      style={{ paddingTop: "env(safe-area-inset-top)" }}
+    >
+      <div className="flex h-14 items-center justify-between gap-3 px-4 md:px-5">
 
-        {/* Right — actions */}
+        {/* Title */}
+        <h1 className="truncate text-[15px] font-semibold tracking-tight text-white/90">
+          {title}
+        </h1>
+
+        {/* Right actions */}
         <div className="flex items-center gap-1.5">
           {user && (
             <>
-              {/* Plan badge */}
+              {/* Plan badge — hidden on mobile */}
               <span
                 className={cn(
                   "hidden sm:inline-flex h-7 items-center rounded-full px-2.5 text-[11px] font-bold tracking-wide transition",
@@ -470,34 +430,23 @@ export default function Topbar({
                 {loading ? "···" : isPremium ? "✦ PREMIUM" : "FREE"}
               </span>
 
-              {/* RP balance */}
+              {/* RP balance — hidden on mobile */}
               <Link
                 href="/redeems"
                 className="hidden sm:inline-flex h-7 items-center gap-1.5 rounded-full border border-amber-400/20 bg-amber-400/8 px-2.5 text-[11px] font-bold text-amber-300 hover:bg-amber-400/14 transition"
               >
                 <span className="text-amber-400 text-[10px]">◆</span>
-                {loading
-                  ? "···"
-                  : `${Number(rewardPoints).toLocaleString()} RP`}
+                {loading ? "···" : `${Number(rewardPoints).toLocaleString()} RP`}
               </Link>
             </>
           )}
 
-
-       
           {/* Notification bell */}
           {user ? (
             <NotificationBell uid={user.uid} />
           ) : (
             <button className="flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/40">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
                 <path d="M13.73 21a2 2 0 0 1-3.46 0" />
               </svg>
@@ -516,7 +465,6 @@ export default function Topbar({
               )}
               aria-label="User menu"
             >
-              {/* Avatar */}
               {avatarUrl ? (
                 <img src={avatarUrl} alt={username} className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
               ) : (
@@ -561,16 +509,8 @@ export default function Topbar({
                       </div>
                     </div>
                   </div>
-                  {/* Plan + RP row */}
                   <div className="flex items-center gap-2 mt-2">
-                    <span
-                      className={cn(
-                        "rounded-full px-2 py-0.5 text-[10px] font-bold",
-                        isPremium
-                          ? "bg-amber-400/15 text-amber-300"
-                          : "bg-white/8 text-white/40",
-                      )}
-                    >
+                    <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold", isPremium ? "bg-amber-400/15 text-amber-300" : "bg-white/8 text-white/40")}>
                       {isPremium ? "✦ PREMIUM" : "FREE"}
                     </span>
                     <span className="rounded-full bg-amber-400/10 px-2 py-0.5 text-[10px] font-bold text-amber-300">
@@ -579,162 +519,28 @@ export default function Topbar({
                   </div>
                 </div>
 
-                {/* Navigation */}
+                {/* Navigation links */}
                 <div className="px-2 py-1.5">
                   {[
-                    {
-                      label: "Tournaments",
-                      sub: "NBA · MLB · Soccer",
-                      path: "/tournaments",
-                      svg: (
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <circle cx="12" cy="8" r="6" />
-                          <path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11" />
-                        </svg>
-                      ),
-                    },
-                    {
-                      label: "My Picks",
-                      sub: "Weekly & daily picks",
-                      path: "/my-picks",
-                      svg: (
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <polyline points="9 11 12 14 22 4" />
-                          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-                        </svg>
-                      ),
-                    },
-                    {
-                      label: "Leaderboard",
-                      sub: "Rankings & standings",
-                      path: "/leaderboard",
-                      svg: (
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <line x1="18" y1="20" x2="18" y2="10" />
-                          <line x1="12" y1="20" x2="12" y2="4" />
-                          <line x1="6" y1="20" x2="6" y2="14" />
-                        </svg>
-                      ),
-                    },
-                    {
-                      label: "Store",
-                      sub: "Redeem your RP",
-                      path: "/store",
-                      svg: (
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" />
-                          <line x1="3" y1="6" x2="21" y2="6" />
-                          <path d="M16 10a4 4 0 01-8 0" />
-                        </svg>
-                      ),
-                    },
-                    {
-                      label: "My Rewards",
-                      sub: "RP history",
-                      path: "/redeems",
-                      svg: (
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                        </svg>
-                      ),
-                    },
-                    {
-                      label: "Subscription",
-                      sub: "Plans & billing",
-                      path: "/subscription",
-                      svg: (
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <rect
-                            x="1"
-                            y="4"
-                            width="22"
-                            height="16"
-                            rx="2"
-                            ry="2"
-                          />
-                          <line x1="1" y1="10" x2="23" y2="10" />
-                        </svg>
-                      ),
-                    },
-                    {
-                      label: "Settings",
-                      sub: "Account & preferences",
-                      path: "/settings",
-                      svg: (
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <circle cx="12" cy="12" r="3" />
-                          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
-                        </svg>
-                      ),
-                    },
+                    { label: "Tournaments", sub: "NBA · MLB · Soccer", path: "/tournaments", svg: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11"/></svg> },
+                    { label: "My Picks", sub: "Weekly & daily picks", path: "/picks", svg: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
+                    { label: "Leaderboard", sub: "Rankings & standings", path: "/leaderboard", svg: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
+                    { label: "Store", sub: "Redeem your RP", path: "/store", svg: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg> },
+                    { label: "My Rewards", sub: "RP history", path: "/redeems", svg: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> },
+                    { label: "Subscription", sub: "Plans & billing", path: "/subscription", svg: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg> },
+                    { label: "Settings", sub: "Account & preferences", path: "/settings", svg: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg> },
                   ].map(({ label, sub, path, svg }) => (
                     <button
                       key={path}
-                      onClick={() => {
-                        setOpen(false);
-                        router.push(path);
-                      }}
+                      onClick={() => { setOpen(false); router.push(path); }}
                       className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-white/6 group"
                     >
                       <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-white/8 bg-white/5 text-white/50 group-hover:text-white/80 transition">
                         {svg}
                       </span>
                       <div className="min-w-0">
-                        <div className="text-[13px] font-medium text-white/80 group-hover:text-white transition leading-none mb-0.5">
-                          {label}
-                        </div>
-                        <div className="text-[10px] text-white/30 leading-none">
-                          {sub}
-                        </div>
+                        <div className="text-[13px] font-medium text-white/80 group-hover:text-white transition leading-none mb-0.5">{label}</div>
+                        <div className="text-[10px] text-white/30 leading-none">{sub}</div>
                       </div>
                     </button>
                   ))}
@@ -745,18 +551,10 @@ export default function Topbar({
                     onClick={handleLogout}
                     className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-400/80 hover:bg-red-500/8 hover:text-red-300 transition"
                   >
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className="flex-shrink-0"
-                    >
-                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                      <polyline points="16 17 21 12 16 7" />
-                      <line x1="21" y1="12" x2="9" y2="12" />
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="flex-shrink-0">
+                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                      <polyline points="16 17 21 12 16 7"/>
+                      <line x1="21" y1="12" x2="9" y2="12"/>
                     </svg>
                     Sign out
                   </button>
@@ -765,7 +563,6 @@ export default function Topbar({
             )}
           </div>
         </div>
-      </div>
       </div>
     </header>
   );
