@@ -13,7 +13,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func applicationWillResignActive(_ application: UIApplication) {}
     func applicationDidEnterBackground(_ application: UIApplication) {}
     func applicationWillEnterForeground(_ application: UIApplication) {}
-    func applicationDidBecomeActive(_ application: UIApplication) {}
+
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        // Reset zoom when app becomes active
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if let webView = self.window?.rootViewController?.view.subviews.first(where: { String(describing: type(of: $0)).contains("WKWebView") }) {
+                webView.transform = .identity
+            }
+        }
+    }
+
     func applicationWillTerminate(_ application: UIApplication) {}
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
