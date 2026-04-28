@@ -2,10 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { onAuthStateChanged, signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { ensureUserProfileClient } from "@/lib/ensureUserProfile";
-import Link from "next/link";
 
 // ─── Slides ───────────────────────────────────────────────────────────────────
 
@@ -112,128 +110,15 @@ const slides = [
   },
 ];
 
-// ─── Login Bottom Sheet ───────────────────────────────────────────────────────
-
-function LoginSheet({ onClose }: { onClose: () => void }) {
-  const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPw, setShowPw] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault();
-    setErr(null);
-    setLoading(true);
-    try {
-      await signInWithEmailAndPassword(auth, email.trim(), password);
-      try { await ensureUserProfileClient(); } catch {}
-      try { await auth.currentUser?.getIdToken(true); } catch {}
-      router.replace("/dashboard");
-    } catch (error: unknown) {
-      const code = (error as { code?: string })?.code;
-      if (code === "auth/invalid-credential") setErr("Email o contraseña incorrectos.");
-      else if (code === "auth/too-many-requests") setErr("Demasiados intentos.");
-      else setErr("No se pudo iniciar sesión.");
-    } finally { setLoading(false); }
-  }
-
-  async function handleGoogle() {
-    setErr(null);
-    setGoogleLoading(true);
-    try {
-      await signInWithPopup(auth, new GoogleAuthProvider());
-      try { await ensureUserProfileClient(); } catch {}
-      router.replace("/dashboard");
-    } catch (error: unknown) {
-      const code = (error as { code?: string })?.code;
-      if (code !== "auth/popup-closed-by-user" && code !== "auth/cancelled-popup-request") {
-        setErr("No se pudo iniciar sesión con Google.");
-      }
-    } finally { setGoogleLoading(false); }
-  }
-
-  const inputCls = "w-full h-12 rounded-2xl bg-white/5 border border-white/10 px-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-blue-500/40 focus:ring-2 focus:ring-blue-500/20 transition";
-
-  return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl border-t border-white/10 bg-[#0A0C10] shadow-2xl"
-        style={{paddingBottom:"env(safe-area-inset-bottom)"}}>
-        <div className="flex justify-center pt-3 pb-2">
-          <div className="w-10 h-1 rounded-full bg-white/20" />
-        </div>
-        <div className="px-6 pb-6">
-          <div className="text-center mb-5">
-            <div className="text-lg font-bold text-white">Welcome back</div>
-            <div className="text-sm text-white/40 mt-1">Sign in to your account</div>
-          </div>
-          {err && (
-            <div className="mb-4 rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-200 flex items-center gap-2">
-              <span>⚠</span>{err}
-            </div>
-          )}
-          <button onClick={handleGoogle} disabled={googleLoading || loading}
-            className="w-full h-12 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center gap-3 text-sm font-medium text-white/80 hover:bg-white/8 transition mb-3 disabled:opacity-50">
-            {googleLoading ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" /> : (
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
-                <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
-                <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
-                <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
-              </svg>
-            )}
-            Continue with Google
-          </button>
-          <div className="flex items-center gap-3 mb-3">
-            <div className="flex-1 h-px bg-white/8" />
-            <span className="text-[11px] text-white/25">or with email</span>
-            <div className="flex-1 h-px bg-white/8" />
-          </div>
-          <form onSubmit={handleLogin} className="space-y-3">
-            <input value={email} onChange={(e) => setEmail(e.target.value)}
-              className={inputCls} placeholder="Email" type="email" autoComplete="email" required />
-            <div className="relative">
-              <input value={password} onChange={(e) => setPassword(e.target.value)}
-                className={inputCls} placeholder="Password"
-                type={showPw ? "text" : "password"} autoComplete="current-password" required />
-              <button type="button" onClick={() => setShowPw(v => !v)} tabIndex={-1}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-[11px] text-white/30 hover:text-white/60 transition">
-                {showPw ? "Hide" : "Show"}
-              </button>
-            </div>
-            <button type="submit" disabled={loading}
-              className="w-full h-12 rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 transition font-bold text-sm text-white shadow-lg shadow-blue-600/25">
-              {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" />
-                  Signing in…
-                </span>
-              ) : "Sign in"}
-            </button>
-          </form>
-          <div className="text-center text-xs text-white/30 mt-3">
-            <Link href="/forgot-password" className="hover:text-white/60 transition">Forgot password?</Link>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
 // ─── Main Onboarding Page ─────────────────────────────────────────────────────
 
 export default function OnboardingPage() {
   const router = useRouter();
   const [current, setCurrent] = useState(0);
   const [checking, setChecking] = useState(true);
-  const [showLogin, setShowLogin] = useState(false);
   const isLast = current === slides.length - 1;
   const slide = slides[current];
 
-  // Swipe with useRef — works reliably on iOS
   const touchStartX = useRef<number>(0);
   const touchStartY = useRef<number>(0);
 
@@ -249,7 +134,6 @@ export default function OnboardingPage() {
     const onEnd = (e: TouchEvent) => {
       const dx = touchStartX.current - e.changedTouches[0].clientX;
       const dy = touchStartY.current - e.changedTouches[0].clientY;
-      // Only trigger swipe if horizontal movement is dominant
       if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
         if (dx > 0 && current < slides.length - 1) {
           setCurrent(c => c + 1);
@@ -287,92 +171,90 @@ export default function OnboardingPage() {
   }
 
   return (
-    <>
-      <div
-        id="onboarding-swipe"
-        className="min-h-screen bg-[#05070B] flex flex-col relative overflow-hidden select-none"
-        style={{fontFamily:"-apple-system,BlinkMacSystemFont,sans-serif"}}
-      >
-        {/* Background */}
-        <div className="pointer-events-none absolute inset-0">
-          <div className="absolute -top-40 left-1/2 -translate-x-1/2 h-[400px] w-[600px] rounded-full bg-blue-600/15 blur-[100px]" />
+    <div
+      id="onboarding-swipe"
+      className="min-h-screen bg-[#05070B] flex flex-col relative overflow-hidden select-none"
+      style={{fontFamily:"-apple-system,BlinkMacSystemFont,sans-serif"}}
+    >
+      {/* Background */}
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-40 left-1/2 -translate-x-1/2 h-[400px] w-[600px] rounded-full bg-blue-600/15 blur-[100px]" />
+      </div>
+
+      {/* Safe area top */}
+      <div style={{height:"env(safe-area-inset-top)"}} />
+
+      {/* Skip */}
+      {!isLast && (
+        <div className="absolute right-4 z-10" style={{top:"calc(env(safe-area-inset-top) + 16px)"}}>
+          <button onClick={() => setCurrent(slides.length - 1)}
+            className="rounded-full border border-white/10 bg-white/6 px-4 py-1.5 text-xs text-white/45 hover:text-white/70 transition">
+            Skip
+          </button>
         </div>
+      )}
 
-        {/* Safe area top */}
-        <div style={{height:"env(safe-area-inset-top)"}} />
-
-        {/* Skip */}
-        {!isLast && (
-          <div className="absolute right-4 z-10" style={{top:"calc(env(safe-area-inset-top) + 16px)"}}>
-            <button onClick={() => setCurrent(slides.length - 1)}
-              className="rounded-full border border-white/10 bg-white/6 px-4 py-1.5 text-xs text-white/45 hover:text-white/70 transition">
-              Skip
-            </button>
-          </div>
-        )}
-
-        {/* Logo */}
-        <div className="text-center pt-6 flex-shrink-0 relative">
-          <div className="text-[22px] font-black tracking-tight text-white">
-            Stat<span className="text-blue-400">2</span>Win
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 flex flex-col px-6 pt-4 overflow-hidden relative">
-          <div className="flex justify-center mb-3">
-            <div className="rounded-full border border-blue-500/22 bg-blue-500/10 px-4 py-1.5 text-xs font-semibold text-blue-300">
-              {slide.badge}
-            </div>
-          </div>
-          <div className="text-center mb-4 flex-shrink-0">
-            <h1 className="text-[28px] font-black text-white leading-tight" style={{whiteSpace:"pre-line"}}>
-              {slide.title}
-            </h1>
-            <p className="text-[13px] text-white/42 mt-2 leading-relaxed">{slide.sub}</p>
-          </div>
-          <div className="flex-1 overflow-auto pb-2">{slide.visual}</div>
-        </div>
-
-        {/* Bottom */}
-        <div className="px-6 flex-shrink-0 relative" style={{paddingBottom:"calc(env(safe-area-inset-bottom) + 24px)",paddingTop:12}}>
-          {/* Dots */}
-          <div className="flex justify-center gap-1.5 mb-4">
-            {slides.map((_, i) => (
-              <button key={i} onClick={() => setCurrent(i)}
-                className="h-1.5 rounded-full transition-all duration-300"
-                style={{width: i === current ? 24 : 6, background: i === current ? "#3b82f6" : "rgba(255,255,255,0.18)"}} />
-            ))}
-          </div>
-
-          {isLast ? (
-            <div className="flex flex-col gap-3">
-              <button onClick={() => router.push("/signup")}
-                className="w-full rounded-2xl bg-blue-600 text-white font-bold text-[15px] hover:bg-blue-500 active:scale-[0.99] transition shadow-lg shadow-blue-600/30"
-                style={{height:52}}>
-                Create account — free
-              </button>
-              <button onClick={() => setShowLogin(true)}
-                className="w-full rounded-2xl border border-white/10 bg-white/6 text-white/65 font-semibold text-[14px] hover:bg-white/10 hover:text-white transition"
-                style={{height:48}}>
-                Sign in
-              </button>
-            </div>
-          ) : (
-            <button onClick={() => setCurrent(c => c + 1)}
-              className="w-full rounded-2xl bg-blue-600 text-white font-bold text-[15px] hover:bg-blue-500 active:scale-[0.99] transition shadow-lg shadow-blue-600/28 flex items-center justify-center gap-2"
-              style={{height:52}}>
-              Continue <span className="text-lg">→</span>
-            </button>
-          )}
-
-          <div className="text-center text-[11px] text-white/18 mt-3">
-            No gambling · No odds · Skill-based
-          </div>
+      {/* Logo */}
+      <div className="text-center pt-6 flex-shrink-0 relative">
+        <div className="text-[22px] font-black tracking-tight text-white">
+          Stat<span className="text-blue-400">2</span>Win
         </div>
       </div>
 
-      {showLogin && <LoginSheet onClose={() => setShowLogin(false)} />}
-    </>
+      {/* Content */}
+      <div className="flex-1 flex flex-col px-6 pt-4 overflow-hidden relative">
+        <div className="flex justify-center mb-3">
+          <div className="rounded-full border border-blue-500/22 bg-blue-500/10 px-4 py-1.5 text-xs font-semibold text-blue-300">
+            {slide.badge}
+          </div>
+        </div>
+        <div className="text-center mb-4 flex-shrink-0">
+          <h1 className="text-[28px] font-black text-white leading-tight" style={{whiteSpace:"pre-line"}}>
+            {slide.title}
+          </h1>
+          <p className="text-[13px] text-white/42 mt-2 leading-relaxed">{slide.sub}</p>
+        </div>
+        <div className="flex-1 overflow-auto pb-2">{slide.visual}</div>
+      </div>
+
+      {/* Bottom */}
+      <div className="px-6 flex-shrink-0 relative" style={{paddingBottom:"calc(env(safe-area-inset-bottom) + 24px)",paddingTop:12}}>
+        {/* Dots */}
+        <div className="flex justify-center gap-1.5 mb-4">
+          {slides.map((_, i) => (
+            <button key={i} onClick={() => setCurrent(i)}
+              className="h-1.5 rounded-full transition-all duration-300"
+              style={{width: i === current ? 24 : 6, background: i === current ? "#3b82f6" : "rgba(255,255,255,0.18)"}} />
+          ))}
+        </div>
+
+        {isLast ? (
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={() => router.push("/signup")}
+              className="w-full rounded-2xl bg-blue-600 text-white font-bold text-[15px] hover:bg-blue-500 active:scale-[0.99] transition shadow-lg shadow-blue-600/30"
+              style={{height:52}}>
+              Create account — free
+            </button>
+            <button
+              onClick={() => router.push("/login")}
+              className="w-full rounded-2xl border border-white/10 bg-white/6 text-white/65 font-semibold text-[14px] hover:bg-white/10 hover:text-white transition"
+              style={{height:48}}>
+              Sign in
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setCurrent(c => c + 1)}
+            className="w-full rounded-2xl bg-blue-600 text-white font-bold text-[15px] hover:bg-blue-500 active:scale-[0.99] transition shadow-lg shadow-blue-600/28 flex items-center justify-center gap-2"
+            style={{height:52}}>
+            Continue <span className="text-lg">→</span>
+          </button>
+        )}
+
+        <div className="text-center text-[11px] text-white/18 mt-3">
+          No gambling · No odds · Skill-based
+        </div>
+      </div>
+    </div>
   );
 }
