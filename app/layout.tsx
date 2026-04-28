@@ -24,18 +24,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" style={{ height: "100%", overflow: "hidden" }}>
       <head>
        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="Stat2Win" />
         <meta name="theme-color" content="#05070B" />
         <link rel="apple-touch-icon" href="/icon-512.png" />
         <link rel="manifest" href="/manifest.json" />
       </head>
-      <body>
+      <body style={{ height: "100%", overflow: "hidden" }}>
         <Providers>
           <SafeAreaProvider />
           {children}

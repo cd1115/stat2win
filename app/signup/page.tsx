@@ -139,7 +139,7 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen relative overflow-hidden bg-[#05070B] flex flex-col">
+    <div className="h-screen relative overflow-hidden bg-[#05070B] flex flex-col">
 
       {/* Background — only blue */}
       <div className="pointer-events-none absolute inset-0">
@@ -147,8 +147,11 @@ export default function SignupPage() {
         <div className="absolute top-1/2 -right-40 h-[400px] w-[400px] rounded-full bg-blue-500/8 blur-[100px]" />
       </div>
 
+      {/* Safe area spacer */}
+      <div style={{ height: "max(env(safe-area-inset-top), 52px)", flexShrink: 0 }} />
+
       {/* Top bar */}
-      <div className="relative flex items-center justify-between px-6 py-5 flex-shrink-0">
+      <div className="relative flex items-center justify-between px-6 py-3 flex-shrink-0">
         <Link href="/" className="text-xl font-extrabold tracking-tight text-white">
           Stat<span className="text-blue-400">2</span>Win
         </Link>

@@ -22,7 +22,7 @@ export default function StorePublicPage() {
   }, [cat]);
 
   return (
-    <main className="min-h-screen relative overflow-hidden text-white">
+    <main className="h-screen relative overflow-y-auto overflow-x-hidden text-white">
       {/* Background EXACTLY like Login */}
       <div className="absolute inset-0 bg-[#05070B] from-[#070A12] via-[#090B18] to-[#1B1230]" />
       <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 h-[520px] w-[820px] rounded-full bg-blue-500/20 blur-3xl" />

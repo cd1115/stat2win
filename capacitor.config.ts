@@ -9,9 +9,9 @@ const config: CapacitorConfig = {
     cleartext: true,
   },
   ios: {
-    contentInset: "always",
+    contentInset: "automatic",
     allowsLinkPreview: false,
-    scrollEnabled: true,
+    scrollEnabled: false,
   },
 };
 

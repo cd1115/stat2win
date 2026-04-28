@@ -161,7 +161,7 @@ export default function OnboardingPage() {
 
   if (checking) {
     return (
-      <div className="min-h-screen grid place-items-center bg-[#05070B]">
+      <div className="h-screen grid place-items-center bg-[#05070B]">
         <div className="flex flex-col items-center gap-4">
           <div className="text-2xl font-extrabold text-white">Stat<span className="text-blue-400">2</span>Win</div>
           <span className="w-5 h-5 border-2 border-white/20 border-t-blue-400 rounded-full animate-spin inline-block" />
@@ -173,7 +173,7 @@ export default function OnboardingPage() {
   return (
     <div
       id="onboarding-swipe"
-      className="min-h-screen bg-[#05070B] flex flex-col relative overflow-hidden select-none"
+      className="h-screen bg-[#05070B] flex flex-col relative overflow-hidden select-none"
       style={{fontFamily:"-apple-system,BlinkMacSystemFont,sans-serif"}}
     >
       {/* Background */}
@@ -181,12 +181,9 @@ export default function OnboardingPage() {
         <div className="absolute -top-40 left-1/2 -translate-x-1/2 h-[400px] w-[600px] rounded-full bg-blue-600/15 blur-[100px]" />
       </div>
 
-      {/* Safe area top */}
-      <div style={{height:"env(safe-area-inset-top)"}} />
-
       {/* Skip */}
       {!isLast && (
-        <div className="absolute right-4 z-10" style={{top:"calc(env(safe-area-inset-top) + 16px)"}}>
+        <div className="absolute right-4 z-10" style={{top:"max(env(safe-area-inset-top), 52px)"}}>
           <button onClick={() => setCurrent(slides.length - 1)}
             className="rounded-full border border-white/10 bg-white/6 px-4 py-1.5 text-xs text-white/45 hover:text-white/70 transition">
             Skip
@@ -195,7 +192,7 @@ export default function OnboardingPage() {
       )}
 
       {/* Logo */}
-      <div className="text-center pt-6 flex-shrink-0 relative">
+      <div className="text-center flex-shrink-0 relative" style={{ paddingTop: "max(env(safe-area-inset-top), 52px)" }}>
         <div className="text-[22px] font-black tracking-tight text-white">
           Stat<span className="text-blue-400">2</span>Win
         </div>

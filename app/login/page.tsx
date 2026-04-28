@@ -99,7 +99,7 @@ function LoginPageInner() {
 
   if (checking) {
     return (
-      <div className="min-h-screen grid place-items-center bg-[#05070B]">
+      <div className="h-screen grid place-items-center bg-[#05070B]">
         <div className="flex flex-col items-center gap-4">
           <div className="text-2xl font-extrabold tracking-tight text-white">
             Stat<span className="text-blue-400">2</span>Win
@@ -116,7 +116,7 @@ function LoginPageInner() {
   if (user) return null;
 
   return (
-    <div className="min-h-screen relative overflow-hidden bg-[#05070B] flex flex-col">
+    <div className="h-screen relative overflow-hidden bg-[#05070B] flex flex-col">
 
       {/* Background */}
       <div className="pointer-events-none absolute inset-0">
@@ -125,8 +125,11 @@ function LoginPageInner() {
         <div className="absolute -bottom-20 left-1/4 h-[300px] w-[500px] rounded-full bg-blue-700/15 blur-[80px]" />
       </div>
 
+      {/* Safe area spacer */}
+      <div style={{ height: "max(env(safe-area-inset-top), 52px)", flexShrink: 0 }} />
+
       {/* Top bar */}
-      <div className="relative flex items-center justify-between px-6 py-5">
+      <div className="relative flex items-center justify-between px-6 py-3">
         <Link href="/" className="text-xl font-extrabold tracking-tight text-white">
           Stat<span className="text-blue-400">2</span>Win
         </Link>
@@ -289,7 +292,7 @@ function LoginPageInner() {
 export default function LoginPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen grid place-items-center bg-[#05070B]">
+      <div className="h-screen grid place-items-center bg-[#05070B]">
         <div className="flex flex-col items-center gap-4">
           <div className="text-2xl font-extrabold tracking-tight text-white">
             Stat<span className="text-blue-400">2</span>Win
