@@ -2,11 +2,38 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { getWeekId, getWeekRangeLabel } from "@/lib/week";
 import { getDayId, getDayLabel } from "@/lib/day";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
+import { useUserEntitlements } from "@/lib/useUserEntitlements";
+
+// ─── Premium Gate Overlay ──────────────────────────────────────────────────
+function PremiumGate() {
+  const router = useRouter();
+  return (
+    <div className="absolute inset-0 rounded-2xl flex flex-col items-center justify-center gap-3 p-5 text-center z-10"
+      style={{ backdropFilter: "blur(6px)", background: "rgba(0,0,0,0.72)" }}>
+      <div className="flex h-12 w-12 items-center justify-center rounded-full border border-amber-400/30 bg-amber-400/10 text-2xl">
+        ✦
+      </div>
+      <div>
+        <div className="text-sm font-bold text-amber-200 mb-1">Torneo Premium</div>
+        <div className="text-xs text-white/50 leading-relaxed">
+          Únete a Premium para acceder a torneos mixtos y ganar hasta 3× más RP.
+        </div>
+      </div>
+      <button
+        onClick={() => router.push("/subscription")}
+        className="rounded-xl bg-amber-500 hover:bg-amber-400 px-5 py-2 text-sm font-bold text-black transition shadow-lg shadow-amber-500/20"
+      >
+        Ver Premium →
+      </button>
+    </div>
+  );
+}
 
 function LeagueLogo({ league }: { league: string }) {
   const [failed, setFailed] = useState(false);
@@ -278,6 +305,8 @@ type RegState =
 
 export default function TournamentsHubPage() {
   const { user } = useAuth();
+  const { plan } = useUserEntitlements();
+  const isPremium = plan === "premium";
   const weekId = getWeekId(new Date());
   const weekLabel = getWeekRangeLabel(new Date(), "es-PR");
   const dayId = getDayId();
@@ -472,13 +501,16 @@ export default function TournamentsHubPage() {
               </div>
             );
           })}
-          <DailyCard
-            title="Mixed Daily"
-            description="NBA + MLB combined — Premium exclusive tournament."
-            href="/tournaments/daily?sport=mixed"
-            leagues={["NBA", "MLB"]}
-            premium
-          />
+          <div className="relative">
+            <DailyCard
+              title="Mixed Daily"
+              description="NBA + MLB combined — Premium exclusive tournament."
+              href={isPremium ? "/tournaments/daily?sport=mixed" : "#"}
+              leagues={["NBA", "MLB"]}
+              premium
+            />
+            {!isPremium && <PremiumGate />}
+          </div>
         </div>
 
         {/* Daily leaderboard link */}
@@ -630,13 +662,16 @@ export default function TournamentsHubPage() {
               </div>
             );
           })()}
-          <WeeklyCard
-            title="Mixed Tournament"
-            description="Múltiples ligas combinadas. Torneos premium."
-            href="/tournaments/mixed"
-            leagues={["NBA", "NFL", "MLB", "SOCCER"]}
-            badge="Premium"
-          />
+          <div className="relative">
+            <WeeklyCard
+              title="Mixed Tournament"
+              description="Múltiples ligas combinadas. Torneos premium."
+              href={isPremium ? "/tournaments/mixed" : "#"}
+              leagues={["NBA", "NFL", "MLB", "SOCCER"]}
+              badge="Premium"
+            />
+            {!isPremium && <PremiumGate />}
+          </div>
         </div>
 
         {/* Weekly leaderboards row */}
