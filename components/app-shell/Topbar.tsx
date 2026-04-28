@@ -138,7 +138,8 @@ function NotificationBell({ uid }: { uid: string }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-12 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-white/10 bg-[#0E1117] shadow-2xl shadow-black/60 overflow-hidden">
+        <div className="fixed right-4 z-[200] w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-white/10 bg-[#0E1117] shadow-2xl shadow-black/60 overflow-hidden"
+          style={{ top: "calc(max(env(safe-area-inset-top), 44px) + 60px)" }}>
           <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
             <span className="text-sm font-bold text-white">Notifications</span>
             {unread > 0 && (
@@ -264,7 +265,7 @@ export default function Topbar({ title = "Home" }: { title?: string }) {
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/[0.07] bg-[#09090B]/95 backdrop-blur-xl"
-      style={{ paddingTop: "env(safe-area-inset-top)" }}>
+      style={{ paddingTop: "max(env(safe-area-inset-top), 44px)" }}>
       <div className="flex h-14 items-center justify-between gap-3 px-4 md:px-5">
 
         <h1 className="truncate text-[15px] font-semibold tracking-tight text-white/90">{title}</h1>
@@ -311,7 +312,8 @@ export default function Topbar({ title = "Home" }: { title?: string }) {
             </button>
 
             {open && (
-              <div className="absolute right-0 z-[60] mt-2 w-52 overflow-hidden rounded-2xl border border-white/10 bg-[#0E1117] shadow-2xl shadow-black/60" style={{maxWidth: 'calc(100vw - 1rem)', right: 0}}>
+              <div className="fixed right-4 z-[200] w-52 overflow-hidden rounded-2xl border border-white/10 bg-[#0E1117] shadow-2xl shadow-black/60"
+                style={{ top: "calc(max(env(safe-area-inset-top), 44px) + 60px)", maxWidth: "calc(100vw - 2rem)" }}>
 
                 {/* User info */}
                 <div className="px-4 py-4 border-b border-white/8">
