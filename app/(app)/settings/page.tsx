@@ -55,7 +55,7 @@ export default function ProfilePage() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [redeems, setRedeems] = useState<RedeemDoc[]>([]);
   const [loadingRedeems, setLoadingRedeems] = useState(true);
-  const { plan, rewardPoints, loading: entLoading } = useUserEntitlements();
+  const { plan, rewardPoints, loading: entLoading, isAdmin } = useUserEntitlements();
   const isPremium = plan === "premium";
 
   useEffect(() => {
@@ -125,6 +125,11 @@ export default function ProfilePage() {
               <span className="rounded-full bg-amber-400/10 border border-amber-400/20 px-2.5 py-0.5 text-[11px] font-bold text-amber-300">
                 ◆ {entLoading ? "···" : Number(rewardPoints).toLocaleString()} RP
               </span>
+              {isAdmin && (
+                <span className="rounded-full bg-red-500/15 border border-red-500/30 px-2.5 py-0.5 text-[11px] font-bold text-red-300">
+                  🛠️ Admin
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -133,7 +138,7 @@ export default function ProfilePage() {
       {/* ── Menu ── */}
       <div className="rounded-2xl border border-white/10 bg-[#0f1218] overflow-hidden">
         {[
-          { label: "Settings", sub: "Edit profile, avatar, address", href: "/settings", icon: "⚙️" },
+          { label: "Account Settings", sub: "Edit profile, avatar, address", href: "/settings/account", icon: "⚙️" },
           { label: "Subscription", sub: isPremium ? "Premium — active" : "Upgrade to Premium", href: "/subscription", icon: "⭐" },
           { label: "Store", sub: "Redeem your RP for rewards", href: "/store", icon: "🛒" },
         ].map(({ label, sub, href, icon }, i, arr) => (
@@ -150,6 +155,35 @@ export default function ProfilePage() {
         ))}
       </div>
 
+      {/* ── Admin Panel — solo visible para admin ── */}
+      {isAdmin && (
+        <div className="rounded-2xl border border-red-500/20 bg-red-500/5 overflow-hidden">
+          <div className="px-5 py-3 border-b border-red-500/15 flex items-center gap-2">
+            <span className="text-base">🛠️</span>
+            <div>
+              <div className="text-sm font-bold text-red-300">Admin Panel</div>
+              <div className="text-xs text-white/35 mt-0.5">Only visible to you</div>
+            </div>
+          </div>
+          {[
+            { label: "Admin Dashboard", sub: "Sync games, finalize picks, manage users", href: "/admin", icon: "🎮" },
+            { label: "Admin Games", sub: "Manage NBA, MLB & Soccer games", href: "/admin/games", icon: "🏆" },
+            { label: "Admin Redeems", sub: "Process redemption requests", href: "/admin/redeems", icon: "🎁" },
+          ].map(({ label, sub, href, icon }, i, arr) => (
+            <Link key={href} href={href} className={cn("flex items-center justify-between px-5 py-4 hover:bg-red-500/8 transition", i < arr.length - 1 && "border-b border-red-500/10")}>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-lg flex-shrink-0">{icon}</div>
+                <div>
+                  <div className="text-sm font-semibold text-white">{label}</div>
+                  <div className="text-xs text-white/40 mt-0.5">{sub}</div>
+                </div>
+              </div>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/25 flex-shrink-0"><polyline points="9 18 15 12 9 6"/></svg>
+            </Link>
+          ))}
+        </div>
+      )}
+
       {/* ── My Redeems ── */}
       <div className="rounded-2xl border border-white/10 bg-[#0f1218] overflow-hidden">
         <div className="px-5 py-4 border-b border-white/8 flex items-center justify-between">
@@ -159,7 +193,6 @@ export default function ProfilePage() {
           </div>
           <Link href="/redeems" className="text-xs text-blue-400 hover:text-blue-300 transition">View all →</Link>
         </div>
-
         {loadingRedeems ? (
           <div className="px-5 py-6 text-sm text-white/30 text-center">Loading…</div>
         ) : redeems.length === 0 ? (
