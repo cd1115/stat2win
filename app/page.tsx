@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { auth } from "@/lib/firebase";
@@ -159,31 +159,22 @@ function LoginSheet({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      {/* Backdrop */}
       <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-
-      {/* Sheet */}
       <div className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl border-t border-white/10 bg-[#0A0C10] shadow-2xl"
         style={{paddingBottom:"env(safe-area-inset-bottom)"}}>
-
-        {/* Handle */}
         <div className="flex justify-center pt-3 pb-2">
           <div className="w-10 h-1 rounded-full bg-white/20" />
         </div>
-
         <div className="px-6 pb-6">
           <div className="text-center mb-5">
             <div className="text-lg font-bold text-white">Welcome back</div>
             <div className="text-sm text-white/40 mt-1">Sign in to your account</div>
           </div>
-
           {err && (
             <div className="mb-4 rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-200 flex items-center gap-2">
               <span>⚠</span>{err}
             </div>
           )}
-
-          {/* Google */}
           <button onClick={handleGoogle} disabled={googleLoading || loading}
             className="w-full h-12 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center gap-3 text-sm font-medium text-white/80 hover:bg-white/8 transition mb-3 disabled:opacity-50">
             {googleLoading ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" /> : (
@@ -196,13 +187,11 @@ function LoginSheet({ onClose }: { onClose: () => void }) {
             )}
             Continue with Google
           </button>
-
           <div className="flex items-center gap-3 mb-3">
             <div className="flex-1 h-px bg-white/8" />
             <span className="text-[11px] text-white/25">or with email</span>
             <div className="flex-1 h-px bg-white/8" />
           </div>
-
           <form onSubmit={handleLogin} className="space-y-3">
             <input value={email} onChange={(e) => setEmail(e.target.value)}
               className={inputCls} placeholder="Email" type="email" autoComplete="email" required />
@@ -225,7 +214,6 @@ function LoginSheet({ onClose }: { onClose: () => void }) {
               ) : "Sign in"}
             </button>
           </form>
-
           <div className="text-center text-xs text-white/30 mt-3">
             <Link href="/forgot-password" className="hover:text-white/60 transition">Forgot password?</Link>
           </div>
@@ -244,6 +232,40 @@ export default function OnboardingPage() {
   const [showLogin, setShowLogin] = useState(false);
   const isLast = current === slides.length - 1;
   const slide = slides[current];
+
+  // Swipe with useRef — works reliably on iOS
+  const touchStartX = useRef<number>(0);
+  const touchStartY = useRef<number>(0);
+
+  useEffect(() => {
+    const el = document.getElementById("onboarding-swipe");
+    if (!el) return;
+
+    const onStart = (e: TouchEvent) => {
+      touchStartX.current = e.touches[0].clientX;
+      touchStartY.current = e.touches[0].clientY;
+    };
+
+    const onEnd = (e: TouchEvent) => {
+      const dx = touchStartX.current - e.changedTouches[0].clientX;
+      const dy = touchStartY.current - e.changedTouches[0].clientY;
+      // Only trigger swipe if horizontal movement is dominant
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
+        if (dx > 0 && current < slides.length - 1) {
+          setCurrent(c => c + 1);
+        } else if (dx < 0 && current > 0) {
+          setCurrent(c => c - 1);
+        }
+      }
+    };
+
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchend", onEnd, { passive: true });
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchend", onEnd);
+    };
+  }, [current]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -266,9 +288,11 @@ export default function OnboardingPage() {
 
   return (
     <>
-      <div className="min-h-screen bg-[#05070B] flex flex-col relative overflow-hidden"
-        style={{fontFamily:"-apple-system,BlinkMacSystemFont,sans-serif"}}>
-
+      <div
+        id="onboarding-swipe"
+        className="min-h-screen bg-[#05070B] flex flex-col relative overflow-hidden select-none"
+        style={{fontFamily:"-apple-system,BlinkMacSystemFont,sans-serif"}}
+      >
         {/* Background */}
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute -top-40 left-1/2 -translate-x-1/2 h-[400px] w-[600px] rounded-full bg-blue-600/15 blur-[100px]" />
@@ -288,26 +312,7 @@ export default function OnboardingPage() {
         )}
 
         {/* Logo */}
-        {/* Content — swipeable */}
-<div
-  className="flex-1 flex flex-col px-6 pt-4 overflow-hidden relative"
-  onTouchStart={(e) => {
-    const touch = e.touches[0];
-    (e.currentTarget as any)._touchStartX = touch.clientX;
-  }}
-  onTouchEnd={(e) => {
-    const startX = (e.currentTarget as any)._touchStartX;
-    const endX = e.changedTouches[0].clientX;
-    const diff = startX - endX;
-    if (Math.abs(diff) > 50) {
-      if (diff > 0 && current < slides.length - 1) {
-        setCurrent(c => c + 1); // swipe left = next
-      } else if (diff < 0 && current > 0) {
-        setCurrent(c => c - 1); // swipe right = back
-      }
-    }
-  }}
->
+        <div className="text-center pt-6 flex-shrink-0 relative">
           <div className="text-[22px] font-black tracking-tight text-white">
             Stat<span className="text-blue-400">2</span>Win
           </div>
@@ -343,7 +348,7 @@ export default function OnboardingPage() {
           {isLast ? (
             <div className="flex flex-col gap-3">
               <button onClick={() => router.push("/signup")}
-                className="w-full h-13 rounded-2xl bg-blue-600 text-white font-bold text-[15px] hover:bg-blue-500 active:scale-[0.99] transition shadow-lg shadow-blue-600/30"
+                className="w-full rounded-2xl bg-blue-600 text-white font-bold text-[15px] hover:bg-blue-500 active:scale-[0.99] transition shadow-lg shadow-blue-600/30"
                 style={{height:52}}>
                 Create account — free
               </button>
@@ -367,7 +372,6 @@ export default function OnboardingPage() {
         </div>
       </div>
 
-      {/* Login Bottom Sheet */}
       {showLogin && <LoginSheet onClose={() => setShowLogin(false)} />}
     </>
   );
