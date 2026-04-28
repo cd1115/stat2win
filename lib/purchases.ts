@@ -27,7 +27,9 @@ export function isNative(): boolean {
 async function getPlugin() {
   if (!isNative()) return null;
   try {
-    const mod = await import("@capgo/capacitor-purchases");
+    // Use indirect dynamic import so webpack never tries to bundle this native-only module
+    const dynamicImport = new Function("m", "return import(m)");
+    const mod = await dynamicImport("@capgo/capacitor-purchases");
     return (mod as any).CapacitorPurchases ?? mod.default ?? null;
   } catch {
     console.warn("[IAP] @capgo/capacitor-purchases not installed — run: npm install @capgo/capacitor-purchases && npx cap sync ios");
