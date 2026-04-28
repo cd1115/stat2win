@@ -12,10 +12,7 @@
   --font-mono: var(--font-geist-mono);
 }
 
-html {
-  padding-top: env(safe-area-inset-top);
-  background: #05070B;
-}
+
 
 html, body {
   background: #05070B !important;
