@@ -321,9 +321,9 @@ function PicksChart({ weeklyPicks, dailyPicks }: { weeklyPicks: PickDoc[]; daily
 // ─── Streak Card ──────────────────────────────────────────────────────────────
 
 function StreakCard({ uid }: { uid: string | null }) {
-  const [current, setCurrent]  = useState<number | null>(null);
-  const [longest, setLongest]  = useState<number | null>(null);
-  const [loading, setLoading]  = useState(true);
+  const [current, setCurrent] = useState<number | null>(null);
+  const [longest, setLongest] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!uid) { setLoading(false); return; }
@@ -342,82 +342,161 @@ function StreakCard({ uid }: { uid: string | null }) {
     return () => unsub();
   }, [uid]);
 
-  const nextMilestone = current !== null
-    ? current < 5 ? 5 : current < 10 ? 10 : Math.ceil((current + 1) / 10) * 10
-    : 5;
-  const progress = current !== null
-    ? current < 5
-      ? Math.round((current / 5) * 100)
-      : current < 10
-        ? Math.round(((current - 5) / 5) * 100)
-        : Math.round(((current % 10) / 10) * 100)
-    : 0;
-  const nextBonus = nextMilestone <= 5 ? 300 : 1000;
+  const cur = current ?? 0;
+  const prog5  = Math.min(Math.round((cur / 5)  * 100), 100);
+  const prog10 = Math.min(Math.round((cur / 10) * 100), 100);
+  const done5  = cur >= 5;
+  const done10 = cur >= 10;
 
   return (
     <div className="rounded-2xl border border-white/10 bg-[#121418] p-5">
-      <div className="text-sm font-semibold text-white mb-4">Racha de Picks 🔥</div>
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-sm font-semibold text-white">Racha de Picks</div>
+        <div className="flex items-center gap-2">
+          <span className={`text-2xl font-black tabular-nums ${cur >= 5 ? "text-amber-300" : "text-white"}`}>{cur}</span>
+          <span className="text-xl">{cur >= 10 ? "🔥🔥" : cur >= 5 ? "🔥" : cur > 0 ? "✨" : "—"}</span>
+        </div>
+      </div>
 
       {loading ? (
-        <div className="animate-pulse space-y-3">
-          <div className="h-10 rounded-xl bg-white/5" />
-          <div className="h-6 rounded-xl bg-white/5" />
+        <div className="animate-pulse space-y-4">
+          <div className="h-12 rounded-xl bg-white/5" />
+          <div className="h-12 rounded-xl bg-white/5" />
         </div>
       ) : (
-        <>
-          {/* Current streak big display */}
-          <div className="flex items-end gap-3 mb-4">
-            <div>
-              <div className={`text-5xl font-black tabular-nums ${(current ?? 0) >= 5 ? "text-amber-300" : "text-white"}`}>
-                {current ?? 0}
+        <div className="space-y-4">
+          {/* Milestone 1: 5 picks = 500 RP */}
+          <div className={`rounded-xl border p-3 ${done5 ? "border-amber-400/25 bg-amber-400/5" : "border-white/8 bg-white/[0.02]"}`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-base">🔥</span>
+                <span className={`text-xs font-semibold ${done5 ? "text-amber-300" : "text-white/70"}`}>
+                  5 picks corridos
+                </span>
+                {done5 && <span className="rounded-full border border-amber-400/30 bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">✓ LOGRADO</span>}
               </div>
-              <div className="text-xs text-white/40 mt-1">wins consecutivos</div>
+              <span className={`text-xs font-bold ${done5 ? "text-amber-300" : "text-white/40"}`}>+500 RP</span>
             </div>
-            {(current ?? 0) > 0 && (
-              <div className="mb-2 text-3xl">
-                {(current ?? 0) >= 10 ? "🔥🔥" : (current ?? 0) >= 5 ? "🔥" : "✨"}
-              </div>
-            )}
-          </div>
-
-          {/* Progress to next milestone */}
-          <div className="mb-4">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10px] text-white/40">Próximo bonus: {nextMilestone} wins</span>
-              <span className="text-[10px] font-semibold text-amber-300">+{nextBonus} RP</span>
+            <div className="h-2.5 rounded-full bg-white/8 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-700 ${done5 ? "bg-amber-400" : "bg-amber-400/60"}`}
+                style={{ width: `${prog5}%` }}
+              />
             </div>
-            <div className="h-2 rounded-full bg-white/8 overflow-hidden">
-              <div className="h-full rounded-full bg-amber-400/70 transition-all duration-500"
-                style={{ width: `${progress}%` }} />
-            </div>
-            <div className="mt-1 text-[10px] text-white/30">
-              {current ?? 0} / {nextMilestone} picks
+            <div className="mt-1.5 flex items-center justify-between">
+              <span className="text-[10px] text-white/30">{Math.min(cur, 5)} / 5 picks</span>
+              {!done5 && <span className="text-[10px] text-white/25">{5 - cur} más para el bonus</span>}
             </div>
           </div>
 
-          {/* Record */}
-          <div className="grid grid-cols-2 gap-2">
-            <div className="rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2.5">
-              <div className="text-[10px] text-white/35 mb-0.5">Racha actual</div>
-              <div className="text-lg font-bold text-white">{current ?? 0}</div>
+          {/* Milestone 2: 10 picks = 1000 RP */}
+          <div className={`rounded-xl border p-3 ${done10 ? "border-orange-400/25 bg-orange-400/5" : "border-white/8 bg-white/[0.02]"}`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-base">🔥🔥</span>
+                <span className={`text-xs font-semibold ${done10 ? "text-orange-300" : "text-white/70"}`}>
+                  10 picks corridos
+                </span>
+                {done10 && <span className="rounded-full border border-orange-400/30 bg-orange-400/15 px-1.5 py-0.5 text-[9px] font-bold text-orange-300">✓ LOGRADO</span>}
+              </div>
+              <span className={`text-xs font-bold ${done10 ? "text-orange-300" : "text-white/40"}`}>+1000 RP</span>
             </div>
-            <div className="rounded-xl border border-amber-400/15 bg-amber-400/5 px-3 py-2.5">
-              <div className="text-[10px] text-amber-400/60 mb-0.5">Récord personal</div>
+            <div className="h-2.5 rounded-full bg-white/8 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-700 ${done10 ? "bg-orange-400" : "bg-orange-400/60"}`}
+                style={{ width: `${prog10}%` }}
+              />
+            </div>
+            <div className="mt-1.5 flex items-center justify-between">
+              <span className="text-[10px] text-white/30">{Math.min(cur, 10)} / 10 picks</span>
+              {!done10 && <span className="text-[10px] text-white/25">{10 - cur} más para el bonus</span>}
+            </div>
+          </div>
+
+          {/* Record row */}
+          <div className="flex items-center gap-2 pt-1">
+            <div className="flex-1 rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2">
+              <div className="text-[10px] text-white/35">Racha actual</div>
+              <div className="text-lg font-bold text-white">{cur}</div>
+            </div>
+            <div className="flex-1 rounded-xl border border-amber-400/15 bg-amber-400/5 px-3 py-2">
+              <div className="text-[10px] text-amber-400/60">Récord personal</div>
               <div className="text-lg font-bold text-amber-300">{longest ?? 0}</div>
             </div>
           </div>
-
-          {/* Milestone badges */}
-          <div className="mt-3 flex gap-2">
-            <div className={`flex-1 rounded-xl border px-2 py-1.5 text-center text-[10px] font-semibold transition ${(longest ?? 0) >= 5 ? "border-amber-400/30 bg-amber-400/10 text-amber-300" : "border-white/8 bg-white/[0.02] text-white/20"}`}>
-              🔥 5 picks · 300 RP
-            </div>
-            <div className={`flex-1 rounded-xl border px-2 py-1.5 text-center text-[10px] font-semibold transition ${(longest ?? 0) >= 10 ? "border-orange-400/30 bg-orange-400/10 text-orange-300" : "border-white/8 bg-white/[0.02] text-white/20"}`}>
-              🔥🔥 10 picks · 1000 RP
-            </div>
-          </div>
-        </>
+        </div>
       )}
+    </div>
+  );
+}
+
+// ─── Tournament Ranks ─────────────────────────────────────────────────────────
+
+function TournamentRanks({ weekId, uid }: { weekId: string; uid: string | null }) {
+  const [ranks, setRanks] = useState<Record<string, { rank: number; total: number; points: number } | null>>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!uid) { setLoading(false); return; }
+    const sports = ["NBA", "MLB"];
+    let done = 0;
+    setLoading(true);
+    sports.forEach(sport => {
+      const fn = httpsCallable(getFunctions(getApp(), "us-central1"), "getLeaderboardWeek");
+      fn({ weekId, sport, market: "ALL" })
+        .then((res: any) => {
+          const rows: any[] = Array.isArray(res?.data?.rows) ? res.data.rows : [];
+          const idx = rows.findIndex((r: any) => r.uid === uid);
+          setRanks(prev => ({
+            ...prev,
+            [sport]: idx >= 0
+              ? { rank: idx + 1, total: rows.length, points: Number(rows[idx]?.points ?? 0) }
+              : null,
+          }));
+        })
+        .catch(() => setRanks(prev => ({ ...prev, [sport]: null })))
+        .finally(() => { done++; if (done === sports.length) setLoading(false); });
+    });
+  }, [weekId, uid]);
+
+  const SPORT_EMOJI: Record<string, string> = { NBA: "🏀", MLB: "⚾" };
+  const entries = Object.entries(ranks).filter(([, v]) => v !== null);
+
+  if (!loading && entries.length === 0) return null;
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#121418] p-4">
+      <div className="text-xs font-semibold text-white/50 uppercase tracking-wider mb-3">Mis Rankings esta semana</div>
+      {loading ? (
+        <div className="grid grid-cols-2 gap-2">
+          {[1, 2].map(i => <div key={i} className="h-14 animate-pulse rounded-xl bg-white/5" />)}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          {entries.map(([sport, info]) => {
+            const rank = info!.rank;
+            const medal = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : null;
+            return (
+              <div key={sport} className={`rounded-xl border px-3 py-2.5 ${rank <= 3 ? "border-amber-400/20 bg-amber-400/5" : "border-white/8 bg-white/[0.02]"}`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="text-sm">{SPORT_EMOJI[sport] ?? "🎯"}</span>
+                  <span className="text-[10px] text-white/40 font-medium">{sport}</span>
+                </div>
+                <div className={`text-lg font-black ${rank <= 3 ? "text-amber-300" : "text-white"}`}>
+                  {medal ?? `#${rank}`}
+                </div>
+                <div className="text-[9px] text-white/30 mt-0.5">
+                  de {info!.total} · {info!.points} pts
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <Link href="/leaderboard/nba" className="mt-3 block text-center text-[10px] text-white/30 hover:text-white/60 transition">
+        Ver rankings completos →
+      </Link>
     </div>
   );
 }
@@ -504,9 +583,11 @@ export default function DashboardPage() {
   const currentWeekLabel = useMemo(() => getWeekRangeLabel(new Date(), "es-PR"), []);
   const todayDayId       = useMemo(() => getDayId(), []);
 
-  const [uid, setUid]           = useState<string | null>(auth.currentUser?.uid ?? null);
-  const [allPicks, setAllPicks] = useState<PickDoc[]>([]);
-  const [dailyPicks, setDailyPicks] = useState<DailyPickDoc[]>([]);
+  const [uid, setUid]                   = useState<string | null>(auth.currentUser?.uid ?? null);
+  const [displayName, setDisplayName]   = useState<string>(auth.currentUser?.displayName ?? "");
+  const [showOverview, setShowOverview] = useState(false);
+  const [allPicks, setAllPicks]         = useState<PickDoc[]>([]);
+  const [dailyPicks, setDailyPicks]     = useState<DailyPickDoc[]>([]);
   const [loadingPicks, setLoadingPicks] = useState(true);
 
   const [rewardPoints, setRewardPoints] = useState(0);
@@ -518,7 +599,10 @@ export default function DashboardPage() {
   const [welcomeBannerRP, setWelcomeBannerRP] = useState<number | null>(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, u => setUid(u?.uid ?? null));
+    const unsub = onAuthStateChanged(auth, u => {
+      setUid(u?.uid ?? null);
+      setDisplayName(u?.displayName ?? u?.email?.split("@")[0] ?? "");
+    });
     return () => unsub();
   }, []);
 
@@ -633,35 +717,58 @@ export default function DashboardPage() {
     [allPicks, currentWeekId],
   );
 
+  const greeting = (() => {
+    const h = new Date().getHours();
+    return h < 12 ? "Buenos días" : h < 18 ? "Buenas tardes" : "Buenas noches";
+  })();
+
   return (
     <Protected>
-      <div className="mx-auto max-w-6xl px-4 md:px-6 py-8 overflow-x-hidden">
+      <div className="mx-auto max-w-2xl px-3 py-4 overflow-x-hidden">
 
-        {/* Header */}
-        <div className="mb-6 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-white">Dashboard</h1>
-            <p className="text-sm text-white/50 mt-0.5">Tu progreso y recompensas de la semana actual.</p>
-            <div className="mt-1.5 text-xs text-white/30">{currentWeekId} • {currentWeekLabel}</div>
+        {/* ── Overview button row ── */}
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-lg font-bold text-white">Dashboard</h1>
+          <button
+            onClick={() => setShowOverview(true)}
+            className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/60 hover:bg-white/8 hover:text-white/90 transition"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Overview
+          </button>
+        </div>
+
+        {/* ── Welcome card ── */}
+        <div className="mb-4 rounded-2xl overflow-hidden" style={{ background: "linear-gradient(135deg, #1a2340 0%, #0f1623 60%, #141820 100%)", border: "1px solid rgba(255,255,255,0.08)" }}>
+          <div className="px-4 pt-4 pb-3">
+            <div className="text-[10px] text-white/35 uppercase tracking-wider mb-1">{currentWeekId} · {currentWeekLabel}</div>
+            <div className="text-lg font-bold text-white">{greeting}{displayName ? `, ${displayName}` : ""} 👋</div>
+            <div className="text-xs text-white/45 mt-0.5">Tu progreso de la semana actual</div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/60">
-              Plan: {plan.toUpperCase()}
-            </span>
-            <span className="rounded-full border border-amber-300/20 bg-amber-400/10 px-3 py-1 text-xs text-amber-200 font-medium">
-              {loadingRewards ? "…" : `${rewardPoints.toLocaleString()} RP`}
-            </span>
+          <div className="grid grid-cols-2 gap-2 px-4 pb-4">
+            <div className="rounded-xl border border-amber-300/15 bg-amber-400/8 px-3 py-2.5">
+              <div className="text-[10px] text-amber-300/50 uppercase tracking-wide">◆ RP</div>
+              <div className="text-xl font-black text-white mt-0.5">{loadingRewards ? "…" : rewardPoints.toLocaleString()}</div>
+              <div className="text-[10px] text-white/30">Total acumulado</div>
+            </div>
+            <div className="rounded-xl border border-blue-400/15 bg-blue-400/8 px-3 py-2.5">
+              <div className="text-[10px] text-blue-300/50 uppercase tracking-wide">RANK</div>
+              <div className="text-xl font-black text-white mt-0.5">
+                {loadingPicks ? "…" : winRate !== null ? `${winRate}%` : "—"}
+              </div>
+              <div className="text-[10px] text-white/30">Win rate semana</div>
+            </div>
           </div>
         </div>
 
-        {/* Notices */}
+        {/* ── Notices ── */}
         {dailyNotice && (
-          <div className="mb-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-            {dailyNotice}
-          </div>
+          <div className="mb-3 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{dailyNotice}</div>
         )}
         {welcomeBannerRP !== null && (
-          <WelcomeBonusBanner rp={welcomeBannerRP} onDismiss={() => setWelcomeBannerRP(null)} />
+          <div className="mb-3">
+            <WelcomeBonusBanner rp={welcomeBannerRP} onDismiss={() => setWelcomeBannerRP(null)} />
+          </div>
         )}
 
         <OnboardingChecklist
@@ -671,46 +778,48 @@ export default function DashboardPage() {
           welcomeBonusClaimed={welcomeBonusClaimed}
         />
 
-        {/* Stats cards */}
-        <StatsCards
-          rewardPoints={rewardPoints}
-          loadingRewards={loadingRewards}
-          winRate={winRate}
-          loadingPicks={loadingPicks}
-          currentWeekPicks={currentWeekPicks}
-        />
+        {/* ── Stats cards ── */}
+        <div className="mb-4">
+          <StatsCards
+            rewardPoints={rewardPoints}
+            loadingRewards={loadingRewards}
+            winRate={winRate}
+            loadingPicks={loadingPicks}
+            currentWeekPicks={currentWeekPicks}
+          />
+        </div>
 
-        {/* Free Picks Widget */}
-        <div className="mt-5">
+        {/* ── Free Picks Widget ── */}
+        <div className="mb-4">
           <FreePicksWidget />
         </div>
 
-        {/* Main grid: Chart + Streak + Actions + Leaderboard */}
-        <div className="mt-5 grid gap-4 lg:grid-cols-3">
+        {/* ── Streak Card ── */}
+        <div className="mb-4">
+          <StreakCard uid={uid} />
+        </div>
 
-          {/* Col 1: Picks Chart */}
-          <div className="lg:col-span-1">
-            <PicksChart weeklyPicks={weeklyResolved} dailyPicks={dailyPicks} />
-          </div>
+        {/* ── Tournament Rankings ── */}
+        <div className="mb-4">
+          <TournamentRanks weekId={currentWeekId} uid={uid} />
+        </div>
 
-          {/* Col 2: Streak card + Quick actions */}
-          <div className="lg:col-span-1 flex flex-col gap-4">
-            <StreakCard uid={uid} />
+        {/* ── Two-col grid: Chart + Actions ── */}
+        <div className="grid gap-4 md:grid-cols-2 mb-4">
+          <PicksChart weeklyPicks={weeklyResolved} dailyPicks={dailyPicks} />
 
-            {/* Quick actions compact */}
-            <div className="rounded-2xl border border-white/10 bg-[#121418] p-5">
-              <div className="text-sm font-semibold text-white mb-3">Acciones rápidas</div>
+          <div className="flex flex-col gap-3">
+            {/* Quick actions */}
+            <div className="rounded-2xl border border-white/10 bg-[#121418] p-4">
+              <div className="text-xs font-semibold text-white/50 uppercase tracking-wider mb-3">Acciones rápidas</div>
               <div className="flex flex-col gap-2">
-                <Link href="/tournaments"
-                  className="rounded-xl border border-blue-400/20 bg-blue-500/10 px-4 py-2.5 text-sm text-blue-200 flex items-center justify-between hover:bg-blue-500/15 transition">
+                <Link href="/tournaments" className="rounded-xl border border-blue-400/20 bg-blue-500/10 px-4 py-2.5 text-sm text-blue-200 flex items-center justify-between hover:bg-blue-500/15 transition">
                   <span>Ir a Tournaments</span><span className="text-blue-400/50">→</span>
                 </Link>
-                <Link href="/store"
-                  className="rounded-xl border border-amber-300/20 bg-amber-400/10 px-4 py-2.5 text-sm text-amber-200 flex items-center justify-between hover:bg-amber-400/15 transition">
+                <Link href="/store" className="rounded-xl border border-amber-300/20 bg-amber-400/10 px-4 py-2.5 text-sm text-amber-200 flex items-center justify-between hover:bg-amber-400/15 transition">
                   <span>Canjear Rewards</span><span className="text-amber-400/50">→</span>
                 </Link>
-                <Link href="/picks"
-                  className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white/65 flex items-center justify-between hover:bg-white/6 transition">
+                <Link href="/picks" className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white/65 flex items-center justify-between hover:bg-white/6 transition">
                   <span>Ver mis Picks</span><span className="text-white/25">→</span>
                 </Link>
               </div>
@@ -728,14 +837,100 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
-
-          {/* Col 3: Leaderboard */}
-          <div className="lg:col-span-1">
-            <MiniLeaderboard weekId={currentWeekId} currentUid={uid} />
-          </div>
         </div>
 
+        {/* ── Mini Leaderboard ── */}
+        <MiniLeaderboard weekId={currentWeekId} currentUid={uid} />
+
       </div>
+
+      {/* ══════════════ OVERVIEW MODAL ══════════════ */}
+      {showOverview && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center"
+          style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}
+          onClick={() => setShowOverview(false)}
+        >
+          <div
+            className="w-full max-w-lg overflow-y-auto rounded-t-3xl border-t border-white/10 bg-[#0d1014] pb-10"
+            style={{ maxHeight: "85vh" }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Handle */}
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="h-1 w-10 rounded-full bg-white/20" />
+            </div>
+
+            <div className="px-5 pt-3 pb-2 flex items-center justify-between">
+              <div className="text-base font-bold text-white">📋 Cómo funciona</div>
+              <button onClick={() => setShowOverview(false)} className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/50 hover:bg-white/8 transition">✕</button>
+            </div>
+
+            <div className="px-5 space-y-4">
+              {/* Basics */}
+              <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                <div className="text-xs font-bold text-white/70 uppercase tracking-wider mb-3">🎯 Lo básico</div>
+                <div className="space-y-2 text-sm text-white/60">
+                  <p>Haz picks en los torneos disponibles (NBA, MLB, Soccer) y gana <span className="text-amber-300 font-semibold">Reward Points (RP)</span> por cada pick correcto.</p>
+                  <p>Hay dos tipos de torneos: <span className="text-blue-300 font-semibold">Weekly</span> (picks de la semana) y <span className="text-amber-300 font-semibold">Daily</span> (picks del día).</p>
+                </div>
+              </div>
+
+              {/* Points */}
+              <div className="rounded-2xl border border-amber-400/15 bg-amber-400/5 p-4">
+                <div className="text-xs font-bold text-amber-300/70 uppercase tracking-wider mb-3">◆ Puntos RP</div>
+                <div className="space-y-2">
+                  {[
+                    { label: "Pick correcto (free)",    val: "+100 RP" },
+                    { label: "Pick correcto (premium)", val: "+150 RP" },
+                    { label: "Daily login",             val: "+5 RP" },
+                    { label: "Bienvenida",              val: "+25 RP" },
+                  ].map(({ label, val }) => (
+                    <div key={label} className="flex items-center justify-between">
+                      <span className="text-sm text-white/55">{label}</span>
+                      <span className="text-sm font-bold text-amber-300">{val}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Streaks */}
+              <div className="rounded-2xl border border-orange-400/15 bg-orange-400/5 p-4">
+                <div className="text-xs font-bold text-orange-300/70 uppercase tracking-wider mb-3">🔥 Bonos de Racha</div>
+                <div className="space-y-2">
+                  {[
+                    { label: "5 picks corridos",  val: "+500 RP",  emoji: "🔥" },
+                    { label: "10 picks corridos", val: "+1000 RP", emoji: "🔥🔥" },
+                  ].map(({ label, val, emoji }) => (
+                    <div key={label} className="flex items-center justify-between">
+                      <span className="text-sm text-white/55">{emoji} {label}</span>
+                      <span className="text-sm font-bold text-orange-300">{val}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Premium */}
+              <div className="rounded-2xl border border-purple-400/15 bg-purple-400/5 p-4">
+                <div className="text-xs font-bold text-purple-300/70 uppercase tracking-wider mb-3">✦ Premium</div>
+                <div className="space-y-2 text-sm text-white/55">
+                  <p>Los usuarios <span className="text-purple-300 font-semibold">Premium</span> desbloquean torneos mixtos (Mixed Daily & Mixed Weekly) y ganan <span className="text-purple-300 font-semibold">50% más RP</span> por pick correcto.</p>
+                </div>
+                <Link href="/subscription" className="mt-3 block text-center rounded-xl border border-purple-400/20 bg-purple-500/10 py-2 text-xs text-purple-300 hover:bg-purple-500/15 transition">
+                  Ver planes →
+                </Link>
+              </div>
+
+              {/* Leaderboard */}
+              <div className="rounded-2xl border border-blue-400/15 bg-blue-400/5 p-4">
+                <div className="text-xs font-bold text-blue-300/70 uppercase tracking-wider mb-2">🏆 Leaderboard</div>
+                <p className="text-sm text-white/55">Compite contra otros jugadores cada semana. El ranking se reinicia cada lunes. Los top 3 reciben premios especiales en RP.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </Protected>
   );
 }
