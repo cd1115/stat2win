@@ -926,24 +926,144 @@ export default function DashboardPage() {
 
             <div className="px-5 space-y-4">
 
-              {/* Basics */}
+              {/* ── Cómo funciona ── */}
               <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-                <div className="text-xs font-bold text-white/50 uppercase tracking-wider mb-3">🎯 Lo básico</div>
-                <div className="space-y-2 text-sm text-white/55 leading-relaxed">
-                  <p>Haz picks en los torneos NBA, MLB y Soccer. Cada pick correcto suma <span className="text-white/80 font-semibold">puntos de torneo</span> que determinan tu ranking.</p>
-                  <p>Al finalizar cada torneo (diario a las 11:55 PM, semanal los lunes) recibes <span className="text-amber-300 font-semibold">Reward Points (RP)</span> según tu posición y rendimiento.</p>
+                <div className="text-xs font-bold text-white/50 uppercase tracking-wider mb-3">🎯 Cómo funciona</div>
+                <div className="space-y-3 text-sm leading-relaxed">
+                  <div className="flex gap-2.5">
+                    <span className="mt-0.5 shrink-0 text-base">1️⃣</span>
+                    <p className="text-white/55">Haz picks en los torneos <span className="text-white/80 font-semibold">NBA, MLB y Soccer</span>. Cada resultado suma <span className="text-white/80 font-semibold">puntos de torneo</span> que construyen tu ranking.</p>
+                  </div>
+                  <div className="flex gap-2.5">
+                    <span className="mt-0.5 shrink-0 text-base">2️⃣</span>
+                    <p className="text-white/55">Al cierre del torneo recibes <span className="text-amber-300 font-semibold">Reward Points (RP)</span> según cuántos picks correctos tuviste y en qué posición quedaste. <span className="text-white/40">Solo el Top 10 recibe RP.</span></p>
+                  </div>
+                  <div className="flex gap-2.5">
+                    <span className="mt-0.5 shrink-0 text-base">⏰</span>
+                    <p className="text-white/55">Diario cierra a las <span className="text-white/75 font-semibold">11:55 PM PR</span>. Semanal cierra cada <span className="text-white/75 font-semibold">lunes a las 12:05 AM PR</span>.</p>
+                  </div>
                 </div>
               </div>
 
-              {/* Tournament pick points */}
-              <div className="rounded-2xl border border-amber-400/15 bg-amber-400/5 p-4">
-                <div className="text-xs font-bold text-amber-300/60 uppercase tracking-wider mb-3">◆ Puntos de torneo (pick)</div>
+              {/* ── Puntos de torneo por pick ── */}
+              <div className="rounded-2xl border border-white/8 bg-white/[0.025] p-4">
+                <div className="text-xs font-bold text-white/40 uppercase tracking-wider mb-3">◆ Puntos de torneo por pick</div>
                 <div className="space-y-2">
                   {[
-                    { label: "✅ Win",              val: "100 pts",  color: "text-emerald-400" },
-                    { label: "↩️ Push",             val: "50 pts",   color: "text-yellow-400" },
-                    { label: "❌ Loss",             val: "0 pts",    color: "text-red-400/70" },
-                    { label: "⚽ Draw correcto",   val: "200 pts",  color: "text-emerald-400" },
+                    { label: "✅ Win",              val: "100 pts", color: "text-emerald-400" },
+                    { label: "↩️ Push",             val: "50 pts",  color: "text-yellow-400" },
+                    { label: "❌ Loss",             val: "0 pts",   color: "text-red-400/60" },
+                    { label: "⚽ Draw correcto (Soccer)", val: "200 pts", color: "text-emerald-400" },
+                  ].map(({ label, val, color }) => (
+                    <div key={label} className="flex items-center justify-between py-0.5">
+                      <span className="text-sm text-white/50">{label}</span>
+                      <span className={`text-sm font-bold ${color}`}>{val}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2.5 text-[11px] text-white/28 border-t border-white/6 pt-2">Los puntos de torneo son iguales para Free y Premium. La diferencia está en los RP que recibes al cierre.</p>
+              </div>
+
+              {/* ── RP semanal ── */}
+              <div className="rounded-2xl border border-blue-400/15 bg-blue-500/5 p-4">
+                <div className="text-[11px] font-bold text-blue-300/60 uppercase tracking-wider mb-1">🏆 RP semanal — al cierre (NBA · MLB · Soccer)</div>
+                <p className="text-[11px] text-white/30 mb-3">Solo el <span className="text-white/50 font-semibold">Top 10</span> recibe RP. Se calcula por cada pick correcto de la semana más bonos de posición.</p>
+
+                {/* Header row */}
+                <div className="grid grid-cols-3 gap-2 mb-1.5">
+                  <div className="text-[10px] text-white/30 uppercase font-bold"></div>
+                  <div className="text-[10px] text-white/40 uppercase font-bold text-center">Free</div>
+                  <div className="text-[10px] text-purple-300/50 uppercase font-bold text-center">Premium ✦</div>
+                </div>
+                {[
+                  { label: "Por cada Win",          free: "×3 RP",  prem: "×10 RP" },
+                  { label: "Por cada Push",         free: "×1 RP",  prem: "×3 RP" },
+                  { label: "Bono Top 10",           free: "+10 RP", prem: "+50 RP" },
+                  { label: "Bono #1",               free: "+100 RP",prem: "+500 RP" },
+                  { label: "Bono #2",               free: "—",      prem: "+200 RP" },
+                  { label: "Bono #3",               free: "—",      prem: "+100 RP" },
+                ].map(({ label, free, prem }) => (
+                  <div key={label} className="grid grid-cols-3 gap-2 py-1 border-t border-white/[0.05]">
+                    <span className="text-xs text-white/40">{label}</span>
+                    <span className="text-xs font-semibold text-blue-300/80 text-center">{free}</span>
+                    <span className="text-xs font-semibold text-purple-300/80 text-center">{prem}</span>
+                  </div>
+                ))}
+                <p className="mt-2.5 text-[11px] text-white/25 border-t border-white/6 pt-2">
+                  Ejemplo Free: 8 wins + 2 push + Top 10 = (8×3) + (2×1) + 10 = <span className="text-blue-300/60 font-bold">36 RP</span>. Si quedas #1 suma +100 RP más.
+                </p>
+              </div>
+
+              {/* ── RP diario ── */}
+              <div className="rounded-2xl border border-amber-400/15 bg-amber-500/5 p-4">
+                <div className="text-[11px] font-bold text-amber-300/60 uppercase tracking-wider mb-1">⚡ RP diario — al cierre (NBA · MLB)</div>
+                <p className="text-[11px] text-white/30 mb-3">Solo el <span className="text-white/50 font-semibold">Top 10</span> recibe RP al cierre del día.</p>
+
+                <div className="grid grid-cols-3 gap-2 mb-1.5">
+                  <div className="text-[10px] text-white/30 uppercase font-bold"></div>
+                  <div className="text-[10px] text-white/40 uppercase font-bold text-center">Free</div>
+                  <div className="text-[10px] text-purple-300/50 uppercase font-bold text-center">Premium ✦</div>
+                </div>
+                {[
+                  { label: "Por cada Win",   free: "×1 RP",  prem: "×5 RP" },
+                  { label: "Por cada Push",  free: "×0 RP",  prem: "×1 RP" },
+                  { label: "Bono Top 10",    free: "+3 RP",  prem: "+25 RP" },
+                  { label: "Bono #1",        free: "+25 RP", prem: "+100 RP" },
+                  { label: "Bono #2",        free: "—",      prem: "+50 RP" },
+                  { label: "Bono #3",        free: "—",      prem: "+25 RP" },
+                ].map(({ label, free, prem }) => (
+                  <div key={label} className="grid grid-cols-3 gap-2 py-1 border-t border-white/[0.05]">
+                    <span className="text-xs text-white/40">{label}</span>
+                    <span className="text-xs font-semibold text-amber-300/80 text-center">{free}</span>
+                    <span className="text-xs font-semibold text-purple-300/80 text-center">{prem}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* ── Desempate ── */}
+              <div className="rounded-2xl border border-white/8 bg-white/[0.025] p-4">
+                <div className="text-xs font-bold text-white/40 uppercase tracking-wider mb-3">⚖️ Desempate — ¿quién gana si hay empate?</div>
+
+                <div className="mb-3">
+                  <div className="text-[11px] font-bold text-blue-300/60 uppercase mb-2">Semanal (NBA · MLB · Soccer)</div>
+                  <div className="space-y-1.5">
+                    {[
+                      { step: "1°", label: "Más puntos de torneo", icon: "◆" },
+                      { step: "2°", label: "Mayor Win Rate (wins ÷ picks totales)", icon: "📊" },
+                      { step: "3°", label: "Más picks realizados", icon: "🎯" },
+                    ].map(({ step, label, icon }) => (
+                      <div key={step} className="flex items-center gap-2.5">
+                        <span className="shrink-0 rounded-md bg-blue-500/15 border border-blue-400/20 px-1.5 py-0.5 text-[10px] font-black text-blue-300/70">{step}</span>
+                        <span className="text-xs text-white/50">{icon} {label}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[11px] text-white/25">Si dos jugadores empatan en los 3 criterios, comparten el premio de #1.</p>
+                </div>
+
+                <div className="border-t border-white/6 pt-3">
+                  <div className="text-[11px] font-bold text-amber-300/60 uppercase mb-2">Diario (NBA · MLB)</div>
+                  <div className="space-y-1.5">
+                    {[
+                      { step: "1°", label: "Más puntos de torneo", icon: "◆" },
+                      { step: "2°", label: "Más picks ganadores (Wins)", icon: "✅" },
+                    ].map(({ step, label, icon }) => (
+                      <div key={step} className="flex items-center gap-2.5">
+                        <span className="shrink-0 rounded-md bg-amber-500/15 border border-amber-400/20 px-1.5 py-0.5 text-[10px] font-black text-amber-300/70">{step}</span>
+                        <span className="text-xs text-white/50">{icon} {label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Racha ── */}
+              <div className="rounded-2xl border border-orange-400/15 bg-orange-400/5 p-4">
+                <div className="text-xs font-bold text-orange-300/60 uppercase tracking-wider mb-3">🔥 Bonos de Racha</div>
+                <div className="space-y-2 mb-3">
+                  {[
+                    { label: "🔥 5 wins seguidos",    val: "+300 RP",  color: "text-amber-300" },
+                    { label: "🔥🔥 10 wins seguidos",  val: "+1000 RP", color: "text-orange-300" },
                   ].map(({ label, val, color }) => (
                     <div key={label} className="flex items-center justify-between">
                       <span className="text-sm text-white/55">{label}</span>
@@ -951,119 +1071,48 @@ export default function DashboardPage() {
                     </div>
                   ))}
                 </div>
-                <p className="mt-2 text-[11px] text-white/30">Igual para FREE y Premium — la ventaja Premium está en los RP finales.</p>
-              </div>
-
-              {/* RP rewards — weekly leaderboard */}
-              <div className="rounded-2xl border border-blue-400/15 bg-blue-400/5 p-4">
-                <div className="text-xs font-bold text-blue-300/60 uppercase tracking-wider mb-3">🏆 RP semanal (NBA · MLB · Soccer)</div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <div className="text-[10px] font-bold text-white/35 uppercase mb-1.5">Free</div>
-                    {[
-                      { label: "Por Win",   val: "×3 RP" },
-                      { label: "Por Push",  val: "×1 RP" },
-                      { label: "Top 10",    val: "+10 RP" },
-                      { label: "#1",        val: "+100 RP" },
-                    ].map(({ label, val }) => (
-                      <div key={label} className="flex justify-between text-xs py-0.5">
-                        <span className="text-white/40">{label}</span>
-                        <span className="text-blue-300/80 font-semibold">{val}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold text-purple-300/50 uppercase mb-1.5">Premium ✦</div>
-                    {[
-                      { label: "Por Win",   val: "×10 RP" },
-                      { label: "Por Push",  val: "×3 RP" },
-                      { label: "Top 10",    val: "+50 RP" },
-                      { label: "#1 / #2 / #3", val: "500 / 200 / 100" },
-                    ].map(({ label, val }) => (
-                      <div key={label} className="flex justify-between text-xs py-0.5">
-                        <span className="text-white/40">{label}</span>
-                        <span className="text-purple-300/80 font-semibold">{val}</span>
-                      </div>
-                    ))}
-                  </div>
+                <div className="space-y-1 border-t border-white/6 pt-2.5 text-[11px] text-white/30">
+                  <p>• <span className="text-white/45">Push</span> no rompe ni avanza la racha.</p>
+                  <p>• <span className="text-white/45">Loss</span> resetea la racha a 0.</p>
+                  <p>• Los bonos se pueden ganar de nuevo en cada nueva racha.</p>
+                  <p>• La racha cuenta picks de todos los deportes mezclados.</p>
                 </div>
               </div>
 
-              {/* RP rewards — daily leaderboard */}
-              <div className="rounded-2xl border border-amber-400/12 bg-amber-400/4 p-4">
-                <div className="text-xs font-bold text-amber-300/60 uppercase tracking-wider mb-3">⚡ RP diario</div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <div className="text-[10px] font-bold text-white/35 uppercase mb-1.5">Free</div>
-                    {[
-                      { label: "Por Win",  val: "×1 RP" },
-                      { label: "Por Push", val: "×0 RP" },
-                      { label: "Top 10",   val: "+3 RP" },
-                      { label: "#1",       val: "+25 RP" },
-                    ].map(({ label, val }) => (
-                      <div key={label} className="flex justify-between text-xs py-0.5">
-                        <span className="text-white/40">{label}</span>
-                        <span className="text-amber-300/80 font-semibold">{val}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold text-purple-300/50 uppercase mb-1.5">Premium ✦</div>
-                    {[
-                      { label: "Por Win",  val: "×5 RP" },
-                      { label: "Por Push", val: "×1 RP" },
-                      { label: "Top 10",   val: "+25 RP" },
-                      { label: "#1 / #2 / #3", val: "100 / 50 / 25" },
-                    ].map(({ label, val }) => (
-                      <div key={label} className="flex justify-between text-xs py-0.5">
-                        <span className="text-white/40">{label}</span>
-                        <span className="text-purple-300/80 font-semibold">{val}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Streaks */}
-              <div className="rounded-2xl border border-orange-400/15 bg-orange-400/5 p-4">
-                <div className="text-xs font-bold text-orange-300/60 uppercase tracking-wider mb-3">🔥 Bonos de Racha (picks ganadores seguidos)</div>
+              {/* ── Otros RP ── */}
+              <div className="rounded-2xl border border-white/8 bg-white/[0.02] p-4">
+                <div className="text-xs font-bold text-white/35 uppercase tracking-wider mb-3">🎁 Otros RP</div>
                 <div className="space-y-2">
                   {[
-                    { label: "🔥 5 wins seguidos",   val: "+300 RP" },
-                    { label: "🔥🔥 10 wins seguidos", val: "+1000 RP" },
-                  ].map(({ label, val }) => (
-                    <div key={label} className="flex items-center justify-between">
-                      <span className="text-sm text-white/55">{label}</span>
-                      <span className="text-sm font-bold text-orange-300">{val}</span>
-                    </div>
-                  ))}
-                </div>
-                <p className="mt-2 text-[11px] text-white/30">Push no rompe ni suma racha. Loss resetea la racha a 0. Los bonos se pueden ganar de nuevo en cada nueva racha.</p>
-              </div>
-
-              {/* Bonus RP */}
-              <div className="rounded-2xl border border-white/8 bg-white/[0.025] p-4">
-                <div className="text-xs font-bold text-white/40 uppercase tracking-wider mb-3">🎁 Otros RP</div>
-                <div className="space-y-2">
-                  {[
-                    { label: "Daily login (cada día)",  val: "+5 RP" },
-                    { label: "Bienvenida (una vez)",    val: "+25 RP" },
-                  ].map(({ label, val }) => (
-                    <div key={label} className="flex items-center justify-between">
-                      <span className="text-sm text-white/50">{label}</span>
-                      <span className="text-sm font-bold text-white/70">{val}</span>
+                    { label: "Daily login",       sub: "Cada día que entras",  val: "+5 RP" },
+                    { label: "Bono Bienvenida",   sub: "Solo una vez al inicio", val: "+25 RP" },
+                  ].map(({ label, sub, val }) => (
+                    <div key={label} className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="text-sm text-white/55">{label}</div>
+                        <div className="text-[10px] text-white/25">{sub}</div>
+                      </div>
+                      <span className="text-sm font-bold text-white/60 shrink-0">{val}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Premium */}
-              <div className="rounded-2xl border border-purple-400/15 bg-purple-400/5 p-4">
-                <div className="text-xs font-bold text-purple-300/60 uppercase tracking-wider mb-2">✦ Ventajas Premium</div>
-                <div className="space-y-1.5 text-sm text-white/50">
-                  <p>• Hasta <span className="text-purple-300 font-semibold">3.3× más RP</span> por Win en torneos semanales</p>
-                  <p>• Premios de podio exclusivos (#1 / #2 / #3)</p>
-                  <p>• Acceso a torneos <span className="text-purple-300 font-semibold">Mixed Daily</span> (NBA + MLB juntos)</p>
+              {/* ── Premium ── */}
+              <div className="rounded-2xl border border-purple-400/15 bg-purple-500/5 p-4">
+                <div className="text-xs font-bold text-purple-300/60 uppercase tracking-wider mb-3">✦ Ventajas Premium</div>
+                <div className="space-y-2">
+                  {[
+                    { icon: "💎", text: "Hasta 3.3× más RP por Win en torneos semanales (×10 vs ×3)" },
+                    { icon: "🏅", text: "Premios exclusivos de podio #1, #2 y #3 en semanal y diario" },
+                    { icon: "🏆", text: "Acceso a Mixed Daily (NBA + MLB en un solo torneo)" },
+                    { icon: "📊", text: "Bono Top 10 de ×8 más que Free en semanal (50 vs 10 RP)" },
+                  ].map(({ icon, text }) => (
+                    <div key={text} className="flex gap-2.5">
+                      <span className="shrink-0">{icon}</span>
+                      <span className="text-sm text-white/50">{text}</span>
+                    </div>
+                  ))}
                 </div>
                 <Link href="/subscription" className="mt-3 block text-center rounded-xl border border-purple-400/20 bg-purple-500/10 py-2 text-xs text-purple-300 hover:bg-purple-500/15 transition">
                   Ver planes →
