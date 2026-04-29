@@ -149,7 +149,7 @@ export default function PaidTournamentsPage() {
           ) : (
             <div className="space-y-3">
               {displayed.map(t => (
-                <Link key={t.id} href={`/tournaments/paid/${t.id}`}
+                <Link key={t.id} href={`/tournaments/paid/detail?id=${t.id}`}
                   className="group relative block rounded-2xl border border-white/8 bg-[#0C0E14] overflow-hidden hover:border-white/15 hover:bg-[#111318] transition-all duration-200">
 
                   {/* Top accent */}
