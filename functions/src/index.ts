@@ -7983,8 +7983,10 @@ function buildPaidMLBTournamentDoc(weekStart: Date): Record<string, any> {
   const startDate = new Date(weekStart);
 
   // endDate + deadline = Saturday 11:59:59pm PR = next-Sunday 03:59:59 UTC
+  // weekStart = Sunday 04:00 UTC; +7 days = next Sunday 04:00 UTC;
+  // then back 4 minutes+1s → Sunday 03:59:59 UTC = Saturday 11:59:59pm PR ✓
   const endDate = new Date(weekStart);
-  endDate.setUTCDate(weekStart.getUTCDate() + 6); // Saturday at 04:00 UTC (midnight PR)
+  endDate.setUTCDate(weekStart.getUTCDate() + 7); // next Sunday 04:00 UTC
   endDate.setUTCHours(3, 59, 59, 999);            // → Saturday 11:59:59pm PR
 
   return {
