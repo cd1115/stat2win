@@ -184,6 +184,13 @@ export default function SettingsPage() {
       <div className="rounded-2xl border border-white/8 bg-[#0C0E14] overflow-hidden">
         {[
           {
+            label: "Mi Cuenta",
+            sub: "Perfil, username y dirección",
+            href: "/settings/account",
+            icon: "👤",
+            iconBg: "bg-blue-400/8 border-blue-400/15 text-blue-300",
+          },
+          {
             label: "Subscription",
             sub: isPremium ? "Premium · Activo" : "Upgrade a Premium",
             href: "/subscription",

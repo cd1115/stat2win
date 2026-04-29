@@ -1292,7 +1292,7 @@ export default function PicksPage() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
               </button>
               <div className="flex flex-col items-center gap-0.5">
-                <span className="text-[10px] text-white/35 uppercase tracking-wider">Week</span>
+                <span className="text-[11px] font-black text-white/60 tracking-widest">{weekId}</span>
                 <span className="text-sm font-semibold text-white">{weekLabel}</span>
               </div>
               <div className="flex items-center gap-1">
