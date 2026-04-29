@@ -366,7 +366,7 @@ function StreakCard({ uid }: { uid: string | null }) {
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Milestone 1: 5 picks = 500 RP */}
+          {/* Milestone 1: 5 picks = 300 RP */}
           <div className={`rounded-xl border p-3 ${done5 ? "border-amber-400/25 bg-amber-400/5" : "border-white/8 bg-white/[0.02]"}`}>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-1.5">
@@ -376,7 +376,7 @@ function StreakCard({ uid }: { uid: string | null }) {
                 </span>
                 {done5 && <span className="rounded-full border border-amber-400/30 bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">✓ LOGRADO</span>}
               </div>
-              <span className={`text-xs font-bold ${done5 ? "text-amber-300" : "text-white/40"}`}>+500 RP</span>
+              <span className={`text-xs font-bold ${done5 ? "text-amber-300" : "text-white/40"}`}>+300 RP</span>
             </div>
             <div className="h-2.5 rounded-full bg-white/8 overflow-hidden">
               <div
@@ -925,44 +925,133 @@ export default function DashboardPage() {
             </div>
 
             <div className="px-5 space-y-4">
+
               {/* Basics */}
               <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-                <div className="text-xs font-bold text-white/70 uppercase tracking-wider mb-3">🎯 Lo básico</div>
-                <div className="space-y-2 text-sm text-white/60">
-                  <p>Haz picks en los torneos disponibles (NBA, MLB, Soccer) y gana <span className="text-amber-300 font-semibold">Reward Points (RP)</span> por cada pick correcto.</p>
-                  <p>Hay dos tipos de torneos: <span className="text-blue-300 font-semibold">Weekly</span> (picks de la semana) y <span className="text-amber-300 font-semibold">Daily</span> (picks del día).</p>
+                <div className="text-xs font-bold text-white/50 uppercase tracking-wider mb-3">🎯 Lo básico</div>
+                <div className="space-y-2 text-sm text-white/55 leading-relaxed">
+                  <p>Haz picks en los torneos NBA, MLB y Soccer. Cada pick correcto suma <span className="text-white/80 font-semibold">puntos de torneo</span> que determinan tu ranking.</p>
+                  <p>Al finalizar cada torneo (diario a las 11:55 PM, semanal los lunes) recibes <span className="text-amber-300 font-semibold">Reward Points (RP)</span> según tu posición y rendimiento.</p>
                 </div>
               </div>
 
-              {/* Points */}
+              {/* Tournament pick points */}
               <div className="rounded-2xl border border-amber-400/15 bg-amber-400/5 p-4">
-                <div className="text-xs font-bold text-amber-300/70 uppercase tracking-wider mb-3">◆ Puntos RP</div>
+                <div className="text-xs font-bold text-amber-300/60 uppercase tracking-wider mb-3">◆ Puntos de torneo (pick)</div>
                 <div className="space-y-2">
                   {[
-                    { label: "Pick correcto (free)",    val: "+100 RP" },
-                    { label: "Pick correcto (premium)", val: "+150 RP" },
-                    { label: "Daily login",             val: "+5 RP" },
-                    { label: "Bienvenida",              val: "+25 RP" },
-                  ].map(({ label, val }) => (
+                    { label: "✅ Win",              val: "100 pts",  color: "text-emerald-400" },
+                    { label: "↩️ Push",             val: "50 pts",   color: "text-yellow-400" },
+                    { label: "❌ Loss",             val: "0 pts",    color: "text-red-400/70" },
+                    { label: "⚽ Draw correcto",   val: "200 pts",  color: "text-emerald-400" },
+                  ].map(({ label, val, color }) => (
                     <div key={label} className="flex items-center justify-between">
                       <span className="text-sm text-white/55">{label}</span>
-                      <span className="text-sm font-bold text-amber-300">{val}</span>
+                      <span className={`text-sm font-bold ${color}`}>{val}</span>
                     </div>
                   ))}
+                </div>
+                <p className="mt-2 text-[11px] text-white/30">Igual para FREE y Premium — la ventaja Premium está en los RP finales.</p>
+              </div>
+
+              {/* RP rewards — weekly leaderboard */}
+              <div className="rounded-2xl border border-blue-400/15 bg-blue-400/5 p-4">
+                <div className="text-xs font-bold text-blue-300/60 uppercase tracking-wider mb-3">🏆 RP semanal (NBA · MLB · Soccer)</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-[10px] font-bold text-white/35 uppercase mb-1.5">Free</div>
+                    {[
+                      { label: "Por Win",   val: "×3 RP" },
+                      { label: "Por Push",  val: "×1 RP" },
+                      { label: "Top 10",    val: "+10 RP" },
+                      { label: "#1",        val: "+100 RP" },
+                    ].map(({ label, val }) => (
+                      <div key={label} className="flex justify-between text-xs py-0.5">
+                        <span className="text-white/40">{label}</span>
+                        <span className="text-blue-300/80 font-semibold">{val}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-bold text-purple-300/50 uppercase mb-1.5">Premium ✦</div>
+                    {[
+                      { label: "Por Win",   val: "×10 RP" },
+                      { label: "Por Push",  val: "×3 RP" },
+                      { label: "Top 10",    val: "+50 RP" },
+                      { label: "#1 / #2 / #3", val: "500 / 200 / 100" },
+                    ].map(({ label, val }) => (
+                      <div key={label} className="flex justify-between text-xs py-0.5">
+                        <span className="text-white/40">{label}</span>
+                        <span className="text-purple-300/80 font-semibold">{val}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* RP rewards — daily leaderboard */}
+              <div className="rounded-2xl border border-amber-400/12 bg-amber-400/4 p-4">
+                <div className="text-xs font-bold text-amber-300/60 uppercase tracking-wider mb-3">⚡ RP diario</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-[10px] font-bold text-white/35 uppercase mb-1.5">Free</div>
+                    {[
+                      { label: "Por Win",  val: "×1 RP" },
+                      { label: "Por Push", val: "×0 RP" },
+                      { label: "Top 10",   val: "+3 RP" },
+                      { label: "#1",       val: "+25 RP" },
+                    ].map(({ label, val }) => (
+                      <div key={label} className="flex justify-between text-xs py-0.5">
+                        <span className="text-white/40">{label}</span>
+                        <span className="text-amber-300/80 font-semibold">{val}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-bold text-purple-300/50 uppercase mb-1.5">Premium ✦</div>
+                    {[
+                      { label: "Por Win",  val: "×5 RP" },
+                      { label: "Por Push", val: "×1 RP" },
+                      { label: "Top 10",   val: "+25 RP" },
+                      { label: "#1 / #2 / #3", val: "100 / 50 / 25" },
+                    ].map(({ label, val }) => (
+                      <div key={label} className="flex justify-between text-xs py-0.5">
+                        <span className="text-white/40">{label}</span>
+                        <span className="text-purple-300/80 font-semibold">{val}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 
               {/* Streaks */}
               <div className="rounded-2xl border border-orange-400/15 bg-orange-400/5 p-4">
-                <div className="text-xs font-bold text-orange-300/70 uppercase tracking-wider mb-3">🔥 Bonos de Racha</div>
+                <div className="text-xs font-bold text-orange-300/60 uppercase tracking-wider mb-3">🔥 Bonos de Racha (picks ganadores seguidos)</div>
                 <div className="space-y-2">
                   {[
-                    { label: "5 picks corridos",  val: "+500 RP",  emoji: "🔥" },
-                    { label: "10 picks corridos", val: "+1000 RP", emoji: "🔥🔥" },
-                  ].map(({ label, val, emoji }) => (
+                    { label: "🔥 5 wins seguidos",   val: "+300 RP" },
+                    { label: "🔥🔥 10 wins seguidos", val: "+1000 RP" },
+                  ].map(({ label, val }) => (
                     <div key={label} className="flex items-center justify-between">
-                      <span className="text-sm text-white/55">{emoji} {label}</span>
+                      <span className="text-sm text-white/55">{label}</span>
                       <span className="text-sm font-bold text-orange-300">{val}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-[11px] text-white/30">Push no rompe ni suma racha. Loss resetea la racha a 0. Los bonos se pueden ganar de nuevo en cada nueva racha.</p>
+              </div>
+
+              {/* Bonus RP */}
+              <div className="rounded-2xl border border-white/8 bg-white/[0.025] p-4">
+                <div className="text-xs font-bold text-white/40 uppercase tracking-wider mb-3">🎁 Otros RP</div>
+                <div className="space-y-2">
+                  {[
+                    { label: "Daily login (cada día)",  val: "+5 RP" },
+                    { label: "Bienvenida (una vez)",    val: "+25 RP" },
+                  ].map(({ label, val }) => (
+                    <div key={label} className="flex items-center justify-between">
+                      <span className="text-sm text-white/50">{label}</span>
+                      <span className="text-sm font-bold text-white/70">{val}</span>
                     </div>
                   ))}
                 </div>
@@ -970,20 +1059,17 @@ export default function DashboardPage() {
 
               {/* Premium */}
               <div className="rounded-2xl border border-purple-400/15 bg-purple-400/5 p-4">
-                <div className="text-xs font-bold text-purple-300/70 uppercase tracking-wider mb-3">✦ Premium</div>
-                <div className="space-y-2 text-sm text-white/55">
-                  <p>Los usuarios <span className="text-purple-300 font-semibold">Premium</span> desbloquean torneos mixtos (Mixed Daily & Mixed Weekly) y ganan <span className="text-purple-300 font-semibold">50% más RP</span> por pick correcto.</p>
+                <div className="text-xs font-bold text-purple-300/60 uppercase tracking-wider mb-2">✦ Ventajas Premium</div>
+                <div className="space-y-1.5 text-sm text-white/50">
+                  <p>• Hasta <span className="text-purple-300 font-semibold">3.3× más RP</span> por Win en torneos semanales</p>
+                  <p>• Premios de podio exclusivos (#1 / #2 / #3)</p>
+                  <p>• Acceso a torneos <span className="text-purple-300 font-semibold">Mixed Daily</span> (NBA + MLB juntos)</p>
                 </div>
                 <Link href="/subscription" className="mt-3 block text-center rounded-xl border border-purple-400/20 bg-purple-500/10 py-2 text-xs text-purple-300 hover:bg-purple-500/15 transition">
                   Ver planes →
                 </Link>
               </div>
 
-              {/* Leaderboard */}
-              <div className="rounded-2xl border border-blue-400/15 bg-blue-400/5 p-4">
-                <div className="text-xs font-bold text-blue-300/70 uppercase tracking-wider mb-2">🏆 Leaderboard</div>
-                <p className="text-sm text-white/55">Compite contra otros jugadores cada semana. El ranking se reinicia cada lunes. Los top 3 reciben premios especiales en RP.</p>
-              </div>
             </div>
           </div>
         </div>
