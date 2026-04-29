@@ -708,6 +708,66 @@ export default function TournamentsHubPage() {
         </div>
       </section>
 
+      {/* ── PAID TOURNAMENTS ── */}
+      <section className="mt-12">
+        <SectionLabel
+          label="Torneos de Pago"
+          sub="Premios en efectivo reales · Stripe · Reembolso automático"
+        />
+
+        <Link
+          href="/tournaments/paid"
+          className="group relative flex flex-col overflow-hidden rounded-2xl border border-amber-400/20 bg-[#0D1117] p-5 transition-all duration-300 hover:border-amber-400/35 hover:bg-[#13181F] hover:shadow-[0_0_50px_rgba(251,191,36,0.12)]"
+        >
+          {/* Animated top accent */}
+          <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-amber-300/70 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+          {/* Glow blob */}
+          <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-amber-400/6 blur-3xl" />
+
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-400/25 bg-amber-400/10 text-xl">
+              🏆
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full border border-amber-300/30 bg-amber-400/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-amber-200">
+                Cash Prizes
+              </span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-white/40">
+                $5 Entrada
+              </span>
+            </div>
+          </div>
+
+          <div className="flex-1">
+            <h3 className="text-base font-semibold text-amber-100">
+              Torneos de Pago
+            </h3>
+            <p className="mt-1 text-sm text-white/50">
+              Entra por $5 y compite por premios reales. 🥇 $100 · 🥈 $50 · 🥉 $25. Reembolso automático si no se alcanza el mínimo de jugadores.
+            </p>
+
+            {/* Mini prize row */}
+            <div className="mt-4 flex items-center gap-3">
+              {[
+                { emoji: "🥇", label: "$100", color: "text-amber-300" },
+                { emoji: "🥈", label: "$50",  color: "text-slate-300" },
+                { emoji: "🥉", label: "$25",  color: "text-orange-300" },
+              ].map(({ emoji, label, color }) => (
+                <div key={label} className="flex items-center gap-1.5 rounded-lg border border-white/6 bg-white/[0.025] px-3 py-1.5">
+                  <span className="text-sm">{emoji}</span>
+                  <span className={`text-xs font-black ${color}`}>{label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4 flex items-center gap-1.5 text-xs font-medium text-amber-300/80 transition-all group-hover:gap-2 group-hover:text-amber-200">
+            Ver torneos disponibles
+            <span className="transition-transform group-hover:translate-x-0.5">→</span>
+          </div>
+        </Link>
+      </section>
+
       <div className="mt-12 text-[11px] text-white/20">
         Scoring: Win 100 · Loss 0 · Push 50 (push aplica a Spread / O-U cuando
         la línea exacta se cumple).
