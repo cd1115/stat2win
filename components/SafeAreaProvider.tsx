@@ -26,4 +26,4 @@ export default function SafeAreaProvider() {
   }, []);
 
   return null;
-}
+} 
