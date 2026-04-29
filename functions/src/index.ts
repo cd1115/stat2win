@@ -7929,3 +7929,132 @@ export const getPaidTournament = onCall({ cors: true }, async (req) => {
 
   return { ok: true, tournament, myEntry };
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PAID MLB TOURNAMENT — AUTO-CREATE (weekly schedule + admin manual trigger)
+// ─────────────────────────────────────────────────────────────────────────────
+// Tournament window: Sunday 12:00am PR → Saturday 11:59:59pm PR (same as weekly)
+// Registration deadline: Saturday 11:59:59pm PR (same as end — users can pay all week)
+// Entry: $5 · Min 50 players · Prizes: $100 / $50 / $25
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Week helpers (mirrors lib/week.ts, usable in Node) ────────────────────────
+
+function getPRMidnight(date: Date): Date {
+  const prStr = date.toLocaleDateString("en-US", {
+    timeZone: "America/Puerto_Rico",
+    year: "numeric", month: "2-digit", day: "2-digit",
+  });
+  const [m, d, y] = prStr.split("/").map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 4, 0, 0, 0)); // midnight PR = UTC-4 → 04:00 UTC
+}
+
+function getWeekStartSundayPR(date = new Date()): Date {
+  const midnight = getPRMidnight(date);
+  const prDayStr = date.toLocaleDateString("en-US", {
+    timeZone: "America/Puerto_Rico", weekday: "short",
+  });
+  const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const dayOfWeek = dayMap[prDayStr] ?? 0;
+  const start = new Date(midnight);
+  start.setUTCDate(start.getUTCDate() - dayOfWeek);
+  return start;
+}
+
+function getWeekIdPR(date = new Date()): string {
+  const start = getWeekStartSundayPR(date);
+  const prYear = Number(
+    start.toLocaleDateString("en-US", { timeZone: "America/Puerto_Rico", year: "numeric" })
+  );
+  const jan1 = new Date(Date.UTC(prYear, 0, 1, 4, 0, 0, 0));
+  const firstSunday = getWeekStartSundayPR(jan1);
+  const diffDays = Math.floor((start.getTime() - firstSunday.getTime()) / 86400000);
+  const weekNo = Math.floor(diffDays / 7) + 1;
+  return `${prYear}-W${String(weekNo).padStart(2, "0")}`;
+}
+
+// ── Build the Firestore document for a paid MLB tournament ────────────────────
+
+function buildPaidMLBTournamentDoc(weekStart: Date): Record<string, any> {
+  const weekId = getWeekIdPR(weekStart);
+  const weekNum = weekId.split("-W")[1];
+
+  // startDate = Sunday 12:00am PR = 04:00 UTC (weekStart is already at 04:00 UTC)
+  const startDate = new Date(weekStart);
+
+  // endDate + deadline = Saturday 11:59:59pm PR = next-Sunday 03:59:59 UTC
+  const endDate = new Date(weekStart);
+  endDate.setUTCDate(weekStart.getUTCDate() + 6); // Saturday at 04:00 UTC (midnight PR)
+  endDate.setUTCHours(3, 59, 59, 999);            // → Saturday 11:59:59pm PR
+
+  return {
+    title: `MLB Paid · Semana ${weekNum}`,
+    sport: "MLB",
+    weekId,
+    entryFee: 500,                   // $5 in cents
+    minPlayers: 50,
+    maxPlayers: 500,
+    prizes: [10000, 5000, 2500],     // $100 · $50 · $25 in cents
+    status: "open",
+    participantCount: 0,
+    deadline: admin.firestore.Timestamp.fromDate(endDate),   // Sab 11:59pm PR
+    startDate: admin.firestore.Timestamp.fromDate(startDate), // Dom 12:00am PR
+    endDate: admin.firestore.Timestamp.fromDate(endDate),    // Sab 11:59pm PR
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
+// ── Scheduled: auto-create every Sunday at 12:01am PR ────────────────────────
+
+export const scheduledCreateWeeklyPaidMLBTournament = onSchedule(
+  { schedule: "1 4 * * 0", timeZone: "UTC" }, // 04:01 UTC Sunday = 12:01am PR
+  async () => {
+    const weekStart = getWeekStartSundayPR(new Date());
+    const weekId    = getWeekIdPR(weekStart);
+    const docId     = `${weekId}_MLB_PAID`;
+
+    const ref      = db.collection("paid_tournaments").doc(docId);
+    const existing = await ref.get();
+    if (existing.exists) {
+      console.log(`[createPaidMLB] ${docId} already exists — skipping.`);
+      return;
+    }
+
+    await ref.set(buildPaidMLBTournamentDoc(weekStart));
+    console.log(`[createPaidMLB] Created ${docId}`);
+  }
+);
+
+// ── Admin: manually create paid MLB tournament (current or next week) ─────────
+
+export const adminCreatePaidMLBTournament = onCall({ cors: true }, async (req) => {
+  const uid = requireAuth(req);
+  const userSnap = await db.collection("users").doc(uid).get();
+  if (!(userSnap.data() as any)?.isAdmin) {
+    throw new HttpsError("permission-denied", "Admins only.");
+  }
+
+  // which = "current" | "next"
+  const which = String(req.data?.which ?? "current");
+  let weekStart = getWeekStartSundayPR(new Date());
+  if (which === "next") {
+    const next = new Date(weekStart);
+    next.setUTCDate(weekStart.getUTCDate() + 7);
+    weekStart = getWeekStartSundayPR(next);
+  }
+
+  const weekId = getWeekIdPR(weekStart);
+  const docId  = `${weekId}_MLB_PAID`;
+
+  const ref      = db.collection("paid_tournaments").doc(docId);
+  const existing = await ref.get();
+  if (existing.exists) {
+    throw new HttpsError("already-exists", `${docId} ya existe.`);
+  }
+
+  await ref.set(buildPaidMLBTournamentDoc(weekStart));
+  console.log(`[adminCreatePaidMLB] Created ${docId} (which=${which})`);
+
+  return { ok: true, docId, weekId };
+});

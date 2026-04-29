@@ -269,14 +269,34 @@ function DetailContent() {
 
               {/* My entry status */}
               {isPaid && (
-                <div className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-500/8 px-4 py-3 flex items-center gap-3">
-                  <span className="text-xl">✅</span>
-                  <div>
-                    <div className="text-sm font-black text-emerald-300">Ya estás inscrito</div>
-                    <div className="text-xs text-white/35 mt-0.5">
-                      {myEntry?.prizeRank ? `🏆 Ganaste #${myEntry.prizeRank} — ${fmtUsd(myEntry.prizeAmountCents ?? 0)}` : "Haz tus picks cuando el torneo inicie."}
+                <div className="mb-4 space-y-2">
+                  <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/8 px-4 py-3 flex items-center gap-3">
+                    <span className="text-xl">✅</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-black text-emerald-300">Ya estás inscrito</div>
+                      <div className="text-xs text-white/35 mt-0.5">
+                        {myEntry?.prizeRank
+                          ? `🏆 Ganaste #${myEntry.prizeRank} — ${fmtUsd(myEntry.prizeAmountCents ?? 0)}`
+                          : "Haz tus picks MLB para acumular puntos en este torneo."}
+                      </div>
                     </div>
                   </div>
+                  {/* Picks CTA — visible when tournament is active (not finished/cancelled) */}
+                  {(isOpen || t.status === "locked") && !isFinished && !isCancelled && (
+                    <Link
+                      href={`/picks?sport=MLB&weekId=${t.weekId}`}
+                      className="flex items-center justify-between rounded-xl border border-blue-400/25 bg-blue-500/8 px-4 py-3 hover:bg-blue-500/12 transition group"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-lg">⚾</span>
+                        <div>
+                          <div className="text-sm font-bold text-blue-300">Hacer Picks MLB</div>
+                          <div className="text-xs text-white/35">Tus picks suman puntos en el torneo</div>
+                        </div>
+                      </div>
+                      <span className="text-blue-400/60 group-hover:text-blue-300 transition text-sm">→</span>
+                    </Link>
+                  )}
                 </div>
               )}
               {isRefunded && (
