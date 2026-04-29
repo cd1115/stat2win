@@ -7593,3 +7593,339 @@ export const adminRescoreSoccerWeek = onCall({ cors: true }, async (req) => {
 
   return { ok: true, weekId, gamesProcessed, picksRescored };
 });
+// ═══════════════════════════════════════════════════════════════════════════════
+// PAID TOURNAMENTS
+// ─────────────────────────────────────────────────────────────────────────────
+// Flow:
+//   1. Admin creates paid_tournaments/{id} doc in Firestore
+//   2. User calls createPaidTournamentCheckout → gets Stripe Checkout URL
+//   3. User pays in Safari → Stripe webhook confirms → entry marked "paid"
+//   4. scheduledCheckPaidTournamentDeadlines runs hourly:
+//        - if deadline passed & participants < minPlayers → cancel + refund all
+//        - if participants >= minPlayers → lock tournament
+//   5. Admin calls adminFinalizePaidTournament to distribute prizes
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import Stripe from "stripe";
+import { onRequest } from "firebase-functions/v2/https";
+
+const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
+const STRIPE_WEBHOOK_SECRET = defineSecret("STRIPE_WEBHOOK_SECRET");
+
+// ── Helper: get Stripe instance ──────────────────────────────────────────────
+function getStripe() {
+  return new Stripe(STRIPE_SECRET_KEY.value(), { apiVersion: "2025-04-30.basil" as any });
+}
+
+// ── (1) Create Stripe Checkout Session ──────────────────────────────────────
+export const createPaidTournamentCheckout = onCall(
+  { cors: true, secrets: [STRIPE_SECRET_KEY] },
+  async (req) => {
+    const uid = requireAuth(req);
+    const tournamentId = String(req.data?.tournamentId ?? "").trim();
+    if (!tournamentId) throw new HttpsError("invalid-argument", "tournamentId is required.");
+
+    // Load tournament
+    const tRef = db.collection("paid_tournaments").doc(tournamentId);
+    const tSnap = await tRef.get();
+    if (!tSnap.exists) throw new HttpsError("not-found", "Tournament not found.");
+    const t = tSnap.data() as any;
+
+    if (t.status !== "open") throw new HttpsError("failed-precondition", `Tournament is ${t.status}.`);
+
+    const deadline = t.deadline?.toDate?.() ?? null;
+    if (deadline && new Date() > deadline) throw new HttpsError("failed-precondition", "Registration deadline has passed.");
+
+    if (t.maxPlayers && t.participantCount >= t.maxPlayers) throw new HttpsError("failed-precondition", "Tournament is full.");
+
+    // Check if already entered
+    const entryRef = db.collection("paid_tournament_entries").doc(`${tournamentId}_${uid}`);
+    const entrySnap = await entryRef.get();
+    if (entrySnap.exists) {
+      const e = entrySnap.data() as any;
+      if (e.paymentStatus === "paid") throw new HttpsError("already-exists", "Ya estás inscrito en este torneo.");
+    }
+
+    // Get user info
+    const userSnap = await db.collection("users").doc(uid).get();
+    const userData = userSnap.data() as any ?? {};
+    const displayName = userData.displayName ?? userData.username ?? uid;
+    const email = userData.email ?? undefined;
+
+    const stripe = getStripe();
+
+    const successUrl = String(req.data?.successUrl ?? `https://stat2win.app/tournaments/paid/${tournamentId}?entry=success`);
+    const cancelUrl  = String(req.data?.cancelUrl  ?? `https://stat2win.app/tournaments/paid/${tournamentId}?entry=cancelled`);
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      payment_method_types: ["card"],
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: "usd",
+          unit_amount: Number(t.entryFee ?? 500), // cents
+          product_data: {
+            name: t.title ?? "Paid Tournament Entry",
+            description: `Entrada al torneo ${t.title ?? ""} — Stat2Win`,
+          },
+        },
+      }],
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      customer_email: email,
+      metadata: {
+        tournamentId,
+        uid,
+        displayName,
+      },
+    });
+
+    // Create pending entry
+    await entryRef.set({
+      tournamentId,
+      uid,
+      displayName,
+      username: userData.username ?? null,
+      paymentStatus: "pending",
+      stripeSessionId: session.id,
+      amountPaid: 0,
+      joinedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    return { ok: true, url: session.url, sessionId: session.id };
+  }
+);
+
+// ── (2) Stripe Webhook ───────────────────────────────────────────────────────
+export const stripeWebhook = onRequest(
+  { secrets: [STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET] },
+  async (req, res) => {
+    const stripe = getStripe();
+    const sig = req.headers["stripe-signature"] as string;
+
+    let event: any;
+    try {
+      event = stripe.webhooks.constructEvent(
+        (req as any).rawBody ?? Buffer.from(JSON.stringify(req.body)),
+        sig,
+        STRIPE_WEBHOOK_SECRET.value()
+      );
+    } catch (err: any) {
+      console.error("Webhook signature failed:", err.message);
+      res.status(400).send(`Webhook Error: ${err.message}`);
+      return;
+    }
+
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as any;
+      if (session.payment_status !== "paid") { res.json({ received: true }); return; }
+
+      const { tournamentId, uid } = session.metadata ?? {};
+      if (!tournamentId || !uid) { res.json({ received: true }); return; }
+
+      const entryRef = db.collection("paid_tournament_entries").doc(`${tournamentId}_${uid}`);
+      const tRef     = db.collection("paid_tournaments").doc(tournamentId);
+
+      await db.runTransaction(async tx => {
+        const entrySnap = await tx.get(entryRef);
+        const tSnap     = await tx.get(tRef);
+        if (!tSnap.exists) return;
+
+        const alreadyPaid = entrySnap.exists && entrySnap.data()?.paymentStatus === "paid";
+        if (alreadyPaid) return; // idempotent
+
+        tx.set(entryRef, {
+          paymentStatus: "paid",
+          stripePaymentIntentId: session.payment_intent ?? null,
+          amountPaid: session.amount_total ?? 0,
+          paidAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+        tx.set(tRef, {
+          participantCount: admin.firestore.FieldValue.increment(1),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      });
+
+      console.log(`[stripeWebhook] Entry confirmed: ${tournamentId}_${uid}`);
+    }
+
+    if (event.type === "charge.refunded") {
+      // Optionally track refunds
+    }
+
+    res.json({ received: true });
+  }
+);
+
+// ── (3) Scheduled: check deadlines hourly ────────────────────────────────────
+export const scheduledCheckPaidTournamentDeadlines = onSchedule(
+  { schedule: "every 60 minutes", timeZone: "America/Puerto_Rico" },
+  async () => {
+    const now = new Date();
+    const stripe = getStripe();
+
+    // Find open tournaments whose deadline has passed
+    const snap = await db.collection("paid_tournaments")
+      .where("status", "==", "open")
+      .get();
+
+    for (const tDoc of snap.docs) {
+      const t = tDoc.data() as any;
+      const deadline = t.deadline?.toDate?.() ?? null;
+      if (!deadline || now < deadline) continue;
+
+      const participants = Number(t.participantCount ?? 0);
+      const minPlayers   = Number(t.minPlayers ?? 50);
+
+      if (participants < minPlayers) {
+        // Cancel tournament and refund all paid entries
+        console.log(`[deadlineCheck] Cancelling ${tDoc.id} — ${participants}/${minPlayers} players`);
+
+        await tDoc.ref.set({ status: "cancelled", cancelledAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+
+        const entriesSnap = await db.collection("paid_tournament_entries")
+          .where("tournamentId", "==", tDoc.id)
+          .where("paymentStatus", "==", "paid")
+          .get();
+
+        for (const eDoc of entriesSnap.docs) {
+          const entry = eDoc.data() as any;
+          const paymentIntentId = entry.stripePaymentIntentId;
+          if (!paymentIntentId) continue;
+          try {
+            await stripe.refunds.create({ payment_intent: paymentIntentId });
+            await eDoc.ref.set({
+              paymentStatus: "refunded",
+              refundedAt: admin.firestore.FieldValue.serverTimestamp(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+            console.log(`[deadlineCheck] Refunded ${eDoc.id}`);
+          } catch (err: any) {
+            console.error(`[deadlineCheck] Refund failed for ${eDoc.id}:`, err.message);
+          }
+        }
+      } else {
+        // Lock tournament — minimum reached
+        console.log(`[deadlineCheck] Locking ${tDoc.id} — ${participants} players confirmed`);
+        await tDoc.ref.set({ status: "locked", lockedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      }
+    }
+  }
+);
+
+// ── (4) Admin: finalize paid tournament — distribute prizes ──────────────────
+export const adminFinalizePaidTournament = onCall(
+  { cors: true, secrets: [STRIPE_SECRET_KEY] },
+  async (req) => {
+    const uid = requireAuth(req);
+
+    // Verify admin
+    const userSnap = await db.collection("users").doc(uid).get();
+    if (!(userSnap.data() as any)?.isAdmin) throw new HttpsError("permission-denied", "Admins only.");
+
+    const tournamentId = String(req.data?.tournamentId ?? "").trim();
+    if (!tournamentId) throw new HttpsError("invalid-argument", "tournamentId required.");
+
+    const tRef  = db.collection("paid_tournaments").doc(tournamentId);
+    const tSnap = await tRef.get();
+    if (!tSnap.exists) throw new HttpsError("not-found", "Tournament not found.");
+    const t = tSnap.data() as any;
+
+    if (t.status === "finished") throw new HttpsError("failed-precondition", "Already finalized.");
+    if (t.status === "cancelled") throw new HttpsError("failed-precondition", "Tournament was cancelled.");
+
+    // prizes in cents e.g. [10000, 5000, 2500]
+    const prizes: number[] = t.prizes ?? [10000, 5000, 2500];
+
+    // Load leaderboard entries for this tournament (picks stored in picks_weekly)
+    // Top 3 by points → win rate → total picks
+    const weekId = String(t.weekId ?? "");
+    const sport  = String(t.sport ?? "NBA");
+
+    const picksSnap = await db.collection("picks_weekly")
+      .where("weekId", "==", weekId)
+      .where("sport", "==", sport)
+      .get();
+
+    // Only count paid entrants
+    const entriesSnap = await db.collection("paid_tournament_entries")
+      .where("tournamentId", "==", tournamentId)
+      .where("paymentStatus", "==", "paid")
+      .get();
+    const paidUids = new Set(entriesSnap.docs.map(d => d.data().uid));
+
+    // Aggregate picks per uid
+    const playerMap = new Map<string, { uid: string; points: number; wins: number; losses: number; pushes: number }>();
+    for (const p of picksSnap.docs) {
+      const d = p.data() as any;
+      if (!paidUids.has(d.uid)) continue;
+      const e = playerMap.get(d.uid) ?? { uid: d.uid, points: 0, wins: 0, losses: 0, pushes: 0 };
+      e.points += Number(d.points ?? 0);
+      if (d.result === "win")  { e.wins++;   }
+      if (d.result === "loss") { e.losses++; }
+      if (d.result === "push") { e.pushes++; }
+      playerMap.set(d.uid, e);
+    }
+
+    const ranked = [...playerMap.values()].sort((a, b) => {
+      if (b.points !== a.points) return b.points - a.points;
+      const wrA = (a.wins + a.losses + a.pushes) > 0 ? a.wins / (a.wins + a.losses + a.pushes) : 0;
+      const wrB = (b.wins + b.losses + b.pushes) > 0 ? b.wins / (b.wins + b.losses + b.pushes) : 0;
+      if (wrB !== wrA) return wrB - wrA;
+      return (b.wins + b.losses + b.pushes) - (a.wins + a.losses + a.pushes);
+    });
+
+    // Mark prizes on entry docs
+    const results: { uid: string; rank: number; prizeAmountCents: number }[] = [];
+    for (let i = 0; i < Math.min(ranked.length, prizes.length); i++) {
+      const player = ranked[i];
+      const prize  = prizes[i] ?? 0;
+      if (prize <= 0) continue;
+
+      await db.collection("paid_tournament_entries")
+        .doc(`${tournamentId}_${player.uid}`)
+        .set({
+          prizeAmountCents: prize,
+          prizeRank: i + 1,
+          prizeStatus: "pending_payout",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+      results.push({ uid: player.uid, rank: i + 1, prizeAmountCents: prize });
+    }
+
+    // Mark tournament finished
+    await tRef.set({
+      status: "finished",
+      finishedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      finalRanking: ranked.slice(0, 10).map((p, i) => ({ uid: p.uid, rank: i + 1, points: p.points })),
+    }, { merge: true });
+
+    return { ok: true, prizesPending: results };
+  }
+);
+
+// ── (5) Get paid tournament details (public + my entry) ──────────────────────
+export const getPaidTournament = onCall({ cors: true }, async (req) => {
+  const uid = req.auth?.uid ?? null;
+  const tournamentId = String(req.data?.tournamentId ?? "").trim();
+  if (!tournamentId) throw new HttpsError("invalid-argument", "tournamentId required.");
+
+  const tSnap = await db.collection("paid_tournaments").doc(tournamentId).get();
+  if (!tSnap.exists) throw new HttpsError("not-found", "Not found.");
+
+  const tournament = { id: tSnap.id, ...tSnap.data() };
+
+  let myEntry = null;
+  if (uid) {
+    const eSnap = await db.collection("paid_tournament_entries").doc(`${tournamentId}_${uid}`).get();
+    if (eSnap.exists) myEntry = eSnap.data();
+  }
+
+  return { ok: true, tournament, myEntry };
+});
