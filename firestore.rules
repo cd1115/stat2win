@@ -65,5 +65,23 @@ service cloud.firestore {
         allow write: if false;
       }
     }
+
+    // ---------------------------
+    // PAID TOURNAMENTS: lectura para logueados.
+    // Escritura solo desde el servidor (Stripe webhook / Admin SDK).
+    // ---------------------------
+    match /paid_tournaments/{tournamentId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // ---------------------------
+    // PAID TOURNAMENT ENTRIES: cada usuario lee su propia entrada.
+    // Escritura solo desde el servidor.
+    // ---------------------------
+    match /paid_tournament_entries/{entryId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
   }
 }
