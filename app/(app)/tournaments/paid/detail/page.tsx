@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { doc, onSnapshot } from "firebase/firestore";
@@ -44,7 +44,9 @@ function countdown(ts?: any): string {
   } catch { return ""; }
 }
 
-export default function PaidTournamentDetailPage() {
+// ─── Inner component (uses useSearchParams — must be inside <Suspense>) ───────
+
+function DetailContent() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   const { user }     = useAuth();
@@ -59,7 +61,7 @@ export default function PaidTournamentDetailPage() {
   const [timeLeft,   setTimeLeft]   = useState("");
 
   useEffect(() => {
-    if (!id) return;
+    if (!id) { setLoading(false); return; }
     return onSnapshot(doc(db, "paid_tournaments", id), snap => {
       if (snap.exists()) setTournament({ id: snap.id, ...snap.data() } as PaidTournament);
       setLoading(false);
@@ -265,7 +267,7 @@ export default function PaidTournamentDetailPage() {
                 ))}
               </div>
 
-              {/* My entry */}
+              {/* My entry status */}
               {isPaid && (
                 <div className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-500/8 px-4 py-3 flex items-center gap-3">
                   <span className="text-xl">✅</span>
@@ -358,5 +360,19 @@ export default function PaidTournamentDetailPage() {
         </div>
       </div>
     </Protected>
+  );
+}
+
+// ─── Default export: wrap in Suspense (required by output: "export") ──────────
+
+export default function PaidTournamentDetailPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen px-4 py-6 max-w-2xl mx-auto space-y-3">
+        {[1,2,3].map(i => <div key={i} className="h-32 animate-pulse rounded-2xl bg-white/4" />)}
+      </div>
+    }>
+      <DetailContent />
+    </Suspense>
   );
 }
