@@ -8060,3 +8060,59 @@ export const adminCreatePaidMLBTournament = onCall({ cors: true }, async (req) =
 
   return { ok: true, docId, weekId };
 });
+
+// ── Admin: fix/overwrite dates on an existing paid tournament ─────────────────
+// Useful when the doc was created manually without timestamps.
+// Call from Firebase Console → Functions → adminFixPaidTournamentDates → Test
+export const adminFixPaidTournamentDates = onCall({ cors: true }, async (req) => {
+  const uid = requireAuth(req);
+  const userSnap = await db.collection("users").doc(uid).get();
+  if (!(userSnap.data() as any)?.isAdmin) {
+    throw new HttpsError("permission-denied", "Admins only.");
+  }
+
+  const tournamentId = String(req.data?.tournamentId ?? "").trim();
+  if (!tournamentId) throw new HttpsError("invalid-argument", "tournamentId required.");
+
+  const ref = db.collection("paid_tournaments").doc(tournamentId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "Tournament not found.");
+
+  const data = snap.data() as any;
+  const weekId: string = data.weekId ?? "";
+  if (!weekId) throw new HttpsError("invalid-argument", "Document has no weekId.");
+
+  // Reconstruct week boundaries from weekId (e.g. "2026-W17")
+  // Find the Sunday of that week
+  const [yearStr, wStr] = weekId.split("-W");
+  const year = Number(yearStr);
+  const weekNum = Number(wStr);
+
+  // Jan 1 midnight PR = Jan 1 04:00 UTC
+  const jan1 = new Date(Date.UTC(year, 0, 1, 4, 0, 0, 0));
+  const firstSunday = getWeekStartSundayPR(jan1);
+
+  // weekStart = firstSunday + (weekNum - 1) * 7 days
+  const weekStart = new Date(firstSunday);
+  weekStart.setUTCDate(firstSunday.getUTCDate() + (weekNum - 1) * 7);
+
+  // endDate = Saturday 11:59:59pm PR = next-Sunday 03:59:59 UTC
+  const endDate = new Date(weekStart);
+  endDate.setUTCDate(weekStart.getUTCDate() + 7);
+  endDate.setUTCHours(3, 59, 59, 999);
+
+  await ref.set({
+    startDate: admin.firestore.Timestamp.fromDate(weekStart),
+    endDate:   admin.firestore.Timestamp.fromDate(endDate),
+    deadline:  admin.firestore.Timestamp.fromDate(endDate),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  return {
+    ok: true,
+    tournamentId,
+    weekId,
+    startDate: weekStart.toISOString(),
+    endDate:   endDate.toISOString(),
+  };
+});
