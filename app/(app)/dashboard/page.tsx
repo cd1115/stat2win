@@ -842,6 +842,64 @@ export default function DashboardPage() {
         {/* ── Mini Leaderboard ── */}
         <MiniLeaderboard weekId={currentWeekId} currentUid={uid} />
 
+        {/* ── Rendimiento Semanal ── */}
+        {!loadingPicks && (
+          <div className="mt-4 rounded-2xl border border-white/10 bg-[#121418] p-5">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-white/35 mb-4">Rendimiento Semanal</div>
+
+            {/* W / L / P big numbers */}
+            <div className="grid grid-cols-3 gap-3 mb-5">
+              {[
+                { label: "W",  val: currentWeekPicks.filter(p => p.result === "win").length,  color: "text-emerald-300", bg: "border-emerald-500/15 bg-emerald-500/5" },
+                { label: "L",  val: currentWeekPicks.filter(p => p.result === "loss").length, color: "text-red-300",     bg: "border-red-500/15 bg-red-500/5" },
+                { label: "P",  val: currentWeekPicks.filter(p => p.result === "push").length, color: "text-white/40",    bg: "border-white/8 bg-white/[0.02]" },
+              ].map(({ label, val, color, bg }) => (
+                <div key={label} className={`rounded-2xl border ${bg} p-3 text-center`}>
+                  <div className={`text-3xl font-black tabular-nums ${color}`}>{val}</div>
+                  <div className="text-[10px] text-white/30 mt-1 font-semibold">{label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Visual bars */}
+            {(() => {
+              const wins   = currentWeekPicks.filter(p => p.result === "win").length;
+              const losses = currentWeekPicks.filter(p => p.result === "loss").length;
+              const pushes = currentWeekPicks.filter(p => p.result === "push").length;
+              const maxVal = Math.max(wins, losses, pushes, 1);
+              const barH   = 80; // max bar height px
+
+              return (
+                <div className="flex items-end justify-center gap-3 h-[100px]">
+                  {[
+                    { val: wins,   color: "bg-emerald-400", label: "W" },
+                    { val: losses, color: "bg-red-400",     label: "L" },
+                    { val: pushes, color: "bg-white/20",    label: "P" },
+                  ].map(({ val, color, label }) => {
+                    const h = Math.max(Math.round((val / maxVal) * barH), val > 0 ? 6 : 2);
+                    return (
+                      <div key={label} className="flex flex-col items-center gap-1.5 flex-1">
+                        <div className="text-[10px] text-white/40 font-bold">{val > 0 ? val : ""}</div>
+                        <div className="w-full rounded-t-lg transition-all duration-700" style={{ height: `${h}px`, background: val > 0 ? undefined : "rgba(255,255,255,0.05)" }} >
+                          {val > 0 && <div className={`w-full h-full rounded-t-lg ${color}`} />}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {/* Win rate summary */}
+            {winRate !== null && (
+              <div className="mt-4 flex items-center justify-center gap-2 pt-3 border-t border-white/[0.06]">
+                <span className="text-xs text-white/35">Win rate esta semana</span>
+                <span className="text-sm font-bold text-emerald-300">{winRate}%</span>
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
 
       {/* ══════════════ OVERVIEW MODAL ══════════════ */}
