@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
+import { collection, onSnapshot, query } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import Protected from "@/components/protected";
@@ -69,11 +69,13 @@ export default function PaidTournamentsPage() {
 
   useEffect(() => {
     const q = query(
-      collection(db, "paid_tournaments"),
-      orderBy("createdAt", "desc")
+      collection(db, "paid_tournaments")
     );
     return onSnapshot(q, snap => {
-      setTournaments(snap.docs.map(d => ({ id: d.id, ...d.data() }) as PaidTournament));
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }) as PaidTournament);
+      // Más reciente primero: ordenar por weekId descendente
+      list.sort((a, b) => (b.weekId ?? "").localeCompare(a.weekId ?? ""));
+      setTournaments(list);
       setLoading(false);
     }, () => setLoading(false));
   }, []);
