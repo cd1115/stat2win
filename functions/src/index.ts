@@ -7633,8 +7633,11 @@ export const createPaidTournamentCheckout = onCall(
 
     if (t.status !== "open") throw new HttpsError("failed-precondition", `Tournament is ${t.status}.`);
 
-    const deadline = t.deadline?.toDate?.() ?? null;
-    if (deadline && new Date() > deadline) throw new HttpsError("failed-precondition", "Registration deadline has passed.");
+    // Block if tournament already started
+    const startDate = t.startDate?.toDate?.() ?? null;
+    if (startDate && new Date() > startDate) {
+      throw new HttpsError("failed-precondition", "El torneo ya comenzó. El registro está cerrado.");
+    }
 
     if (t.maxPlayers && t.participantCount >= t.maxPlayers) throw new HttpsError("failed-precondition", "Tournament is full.");
 
@@ -8114,5 +8117,208 @@ export const adminFixPaidTournamentDates = onCall({ cors: true }, async (req) =>
     weekId,
     startDate: weekStart.toISOString(),
     endDate:   endDate.toISOString(),
+  };
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PAID MLB TOURNAMENT v2 — Saturday open, deadline = 30min before first Sunday game
+// ─────────────────────────────────────────────────────────────────────────────
+// Flow:
+//   Saturday 8am PR  → tournament opens (status: "open")
+//   Sunday           → 30min before first MLB game: deadline reached
+//                      if >= 50 users paid → status: "locked" (tournament runs)
+//                      if < 50 users paid  → cancel + refund all
+//   Following Saturday 11:59pm PR → admin calls adminFinalizePaidTournament
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Helper: find first MLB game start time on a given Sunday (PR) ─────────────
+async function getFirstMLBGameOnSunday(sundayStart: Date): Promise<Date | null> {
+  // sundayStart = Sunday 04:00 UTC (midnight PR)
+  // We look for games with startTime between Sunday 04:00 UTC and Monday 04:00 UTC
+  const dayEnd = new Date(sundayStart);
+  dayEnd.setUTCDate(sundayStart.getUTCDate() + 1);
+
+  const snap = await db.collection("games")
+    .where("sport", "==", "MLB")
+    .where("startTime", ">=", admin.firestore.Timestamp.fromDate(sundayStart))
+    .where("startTime", "<",  admin.firestore.Timestamp.fromDate(dayEnd))
+    .orderBy("startTime", "asc")
+    .limit(1)
+    .get();
+
+  if (snap.empty) return null;
+  return (snap.docs[0].data() as any).startTime?.toDate?.() ?? null;
+}
+
+// ── Build paid MLB tournament doc (Saturday open, dynamic deadline) ────────────
+async function buildPaidMLBTournamentDocV2(nextSunday: Date): Promise<Record<string, any>> {
+  const weekId  = getWeekIdPR(nextSunday);
+  const weekNum = weekId.split("-W")[1];
+
+  // Opens: Saturday 8am PR = Saturday 12:00 UTC (UTC-4 → 8am PR = 12:00 UTC)
+  const saturday = new Date(nextSunday);
+  saturday.setUTCDate(nextSunday.getUTCDate() - 1); // day before Sunday
+  saturday.setUTCHours(12, 0, 0, 0);               // 8am PR = 12:00 UTC
+
+  // Deadline: 30min before first Sunday MLB game (fallback: Sunday 1pm PR = 17:00 UTC)
+  let deadline: Date;
+  const firstGame = await getFirstMLBGameOnSunday(nextSunday);
+  if (firstGame) {
+    deadline = new Date(firstGame.getTime() - 30 * 60 * 1000); // -30 min
+  } else {
+    // Fallback: Sunday 1:00pm PR = 17:00 UTC
+    deadline = new Date(nextSunday);
+    deadline.setUTCHours(17, 0, 0, 0);
+  }
+
+  // Tournament start = first game time (or Sunday noon PR if no games yet)
+  const startDate = firstGame ?? (() => {
+    const d = new Date(nextSunday);
+    d.setUTCHours(16, 0, 0, 0); // noon PR
+    return d;
+  })();
+
+  // Tournament end = following Saturday 11:59:59pm PR = next-next Sunday 03:59:59 UTC
+  const endDate = new Date(nextSunday);
+  endDate.setUTCDate(nextSunday.getUTCDate() + 7);
+  endDate.setUTCHours(3, 59, 59, 999);
+
+  return {
+    title:            `MLB Paid · Semana ${weekNum}`,
+    sport:            "MLB",
+    weekId,
+    entryFee:         500,
+    minPlayers:       50,
+    maxPlayers:       500,
+    prizes:           [10000, 5000, 2500],
+    status:           "open",
+    participantCount: 0,
+    openDate:  admin.firestore.Timestamp.fromDate(saturday),
+    deadline:  admin.firestore.Timestamp.fromDate(deadline),
+    startDate: admin.firestore.Timestamp.fromDate(startDate),
+    endDate:   admin.firestore.Timestamp.fromDate(endDate),
+    firstGameUsed: firstGame ? firstGame.toISOString() : null,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
+// ── Scheduled: create paid MLB tournament every Saturday 8am PR ───────────────
+// cron "0 12 * * 6" UTC = every Saturday 12:00 UTC = 8am PR
+export const scheduledCreateSaturdayPaidMLBTournament = onSchedule(
+  { schedule: "0 12 * * 6", timeZone: "UTC" },
+  async () => {
+    // nextSunday = tomorrow (Saturday + 1 day)
+    const now        = new Date();
+    const tomorrow   = new Date(now);
+    tomorrow.setUTCDate(now.getUTCDate() + 1);
+    const nextSunday = getWeekStartSundayPR(tomorrow);
+    const weekId     = getWeekIdPR(nextSunday);
+    const docId      = `${weekId}_MLB_PAID`;
+
+    const ref      = db.collection("paid_tournaments").doc(docId);
+    const existing = await ref.get();
+    if (existing.exists) {
+      console.log(`[saturdayCreate] ${docId} already exists — skipping.`);
+      return;
+    }
+
+    const data = await buildPaidMLBTournamentDocV2(nextSunday);
+    await ref.set(data);
+    console.log(`[saturdayCreate] Created ${docId} — deadline: ${data.deadline.toDate().toISOString()}`);
+  }
+);
+
+// ── Scheduled: check deadlines every 15 minutes ───────────────────────────────
+export const scheduledCheckPaidTournamentDeadlines15m = onSchedule(
+  { schedule: "*/15 * * * *", timeZone: "UTC" },
+  async () => {
+    const now    = new Date();
+    const stripe = getStripe();
+
+    const snap = await db.collection("paid_tournaments")
+      .where("status", "==", "open")
+      .get();
+
+    for (const tDoc of snap.docs) {
+      const t        = tDoc.data() as any;
+      const deadline = t.deadline?.toDate?.() ?? null;
+      if (!deadline || now < deadline) continue;
+
+      const participants = Number(t.participantCount ?? 0);
+      const minPlayers   = Number(t.minPlayers ?? 50);
+
+      if (participants < minPlayers) {
+        // Cancel + refund
+        console.log(`[15mCheck] Cancelling ${tDoc.id} — ${participants}/${minPlayers}`);
+        await tDoc.ref.set({
+          status:      "cancelled",
+          cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt:   admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+        const entriesSnap = await db.collection("paid_tournament_entries")
+          .where("tournamentId", "==", tDoc.id)
+          .where("paymentStatus", "==", "paid")
+          .get();
+
+        for (const eDoc of entriesSnap.docs) {
+          const paymentIntentId = (eDoc.data() as any).stripePaymentIntentId;
+          if (!paymentIntentId) continue;
+          try {
+            await stripe.refunds.create({ payment_intent: paymentIntentId });
+            await eDoc.ref.set({
+              paymentStatus: "refunded",
+              refundedAt:    admin.firestore.FieldValue.serverTimestamp(),
+              updatedAt:     admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+            console.log(`[15mCheck] Refunded ${eDoc.id}`);
+          } catch (err: any) {
+            console.error(`[15mCheck] Refund failed ${eDoc.id}:`, err.message);
+          }
+        }
+      } else {
+        // Lock — minimum reached, tournament starts
+        console.log(`[15mCheck] Locking ${tDoc.id} — ${participants} players confirmed`);
+        await tDoc.ref.set({
+          status:   "locked",
+          lockedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+    }
+  }
+);
+
+// ── Admin: create paid MLB tournament for next week on demand ─────────────────
+export const adminCreateNextWeekPaidMLBTournament = onCall({ cors: true }, async (req) => {
+  const uid = requireAuth(req);
+  const userSnap = await db.collection("users").doc(uid).get();
+  if (!(userSnap.data() as any)?.isAdmin) {
+    throw new HttpsError("permission-denied", "Admins only.");
+  }
+
+  // Next Sunday from now
+  const now        = new Date();
+  const tomorrow   = new Date(now);
+  tomorrow.setUTCDate(now.getUTCDate() + 1);
+  const nextSunday = getWeekStartSundayPR(tomorrow);
+  const weekId     = getWeekIdPR(nextSunday);
+  const docId      = `${weekId}_MLB_PAID`;
+
+  const ref      = db.collection("paid_tournaments").doc(docId);
+  const existing = await ref.get();
+  if (existing.exists) throw new HttpsError("already-exists", `${docId} ya existe.`);
+
+  const data = await buildPaidMLBTournamentDocV2(nextSunday);
+  await ref.set(data);
+  console.log(`[adminCreate] Created ${docId}`);
+
+  return {
+    ok:       true,
+    docId,
+    weekId,
+    deadline: data.deadline.toDate().toISOString(),
+    openDate: data.openDate.toDate().toISOString(),
   };
 });
