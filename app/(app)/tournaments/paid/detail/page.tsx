@@ -220,11 +220,10 @@ function DetailContent() {
               </div>
 
               {/* Stats */}
-              <div className="grid grid-cols-3 gap-2 mb-5">
+              <div className="grid grid-cols-2 gap-2 mb-5">
                 {[
-                  { label: "Jugadores",  val: String(t.participantCount), sub: `mín ${t.minPlayers}` },
-                  { label: "Tiempo",     val: timeLeft || "—",            sub: "para cierre" },
-                  { label: "Pool mín.",  val: fmtUsd(t.entryFee * t.minPlayers), sub: "si se confirma" },
+                  { label: "Jugadores", val: String(t.participantCount), sub: `mín ${t.minPlayers}` },
+                  { label: "Tiempo",    val: timeLeft || "—",            sub: "para cierre" },
                 ].map(({ label, val, sub }) => (
                   <div key={label} className="rounded-xl border border-white/6 bg-white/[0.02] p-3 text-center">
                     <div className="text-[10px] text-white/30 uppercase font-bold mb-1">{label}</div>
@@ -341,7 +340,6 @@ function DetailContent() {
               <p>• Los picks se hacen igual que en cualquier torneo semanal de {t.sport}.</p>
               <p>• Tiebreaker: Puntos → Win Rate → Total Picks.</p>
               <p>• Si no se alcanzan <span className="text-white/60 font-semibold">{t.minPlayers} participantes</span> antes del cierre, se cancela y se reembolsa el 100%.</p>
-              <p>• Pagos mayores a $600 pueden requerir verificación de identidad (IRS).</p>
               <p>• Al participar aceptas los términos de uso de Stat2Win.</p>
             </div>
           </div>
