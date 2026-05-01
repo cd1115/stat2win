@@ -8420,3 +8420,109 @@ export const placePaidPick = onCall({ cors: true }, async (req) => {
 
   return { ok: true, pickId };
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// getPaidTournamentLeaderboard — Returns ranked participants for a paid tournament
+// ═══════════════════════════════════════════════════════════════════════════════
+export const getPaidTournamentLeaderboard = onCall({ cors: true }, async (req) => {
+  const uid = requireAuth(req);
+  const tournamentId = String(req.data?.tournamentId ?? "").trim();
+  if (!tournamentId) throw new HttpsError("invalid-argument", "tournamentId requerido.");
+
+  // Verify caller is a paid participant (or admin)
+  const entryRef  = db.collection("paid_tournament_entries").doc(`${tournamentId}_${uid}`);
+  const entrySnap = await entryRef.get();
+  const isAdmin   = !!(req.auth?.token?.admin);
+  if (!isAdmin && (!entrySnap.exists || entrySnap.data()?.paymentStatus !== "paid")) {
+    throw new HttpsError("permission-denied", "Debes estar inscrito con pago confirmado para ver el leaderboard.");
+  }
+
+  // Load tournament doc for prize info
+  const tSnap = await db.collection("paid_tournaments").doc(tournamentId).get();
+  if (!tSnap.exists) throw new HttpsError("not-found", "Torneo no encontrado.");
+  const tournament = tSnap.data() as any;
+
+  // Aggregate all picks_paid for this tournament
+  const picksSnap = await db.collection("picks_paid")
+    .where("tournamentId", "==", tournamentId)
+    .get();
+
+  const userMap: Map<string, {
+    uid: string;
+    points: number;
+    wins: number;
+    losses: number;
+    pushes: number;
+    picks: number;
+  }> = new Map();
+
+  for (const d of picksSnap.docs) {
+    const p = d.data() as any;
+    const pUid = String(p.uid ?? "").trim();
+    if (!pUid) continue;
+    const existing = userMap.get(pUid) ?? { uid: pUid, points: 0, wins: 0, losses: 0, pushes: 0, picks: 0 };
+    const result = String(p.result ?? "pending").toLowerCase();
+    const pts    = typeof p.pointsAwarded === "number" ? p.pointsAwarded : 0;
+    existing.points += pts;
+    existing.picks  += 1;
+    if (result === "win")   existing.wins   += 1;
+    if (result === "loss")  existing.losses += 1;
+    if (result === "push")  existing.pushes += 1;
+    userMap.set(pUid, existing);
+  }
+
+  // Also include participants with 0 picks so they appear in the board
+  const allEntriesSnap = await db.collection("paid_tournament_entries")
+    .where("tournamentId", "==", tournamentId)
+    .where("paymentStatus", "==", "paid")
+    .get();
+  for (const d of allEntriesSnap.docs) {
+    const eUid = String(d.data()?.uid ?? "").trim();
+    if (eUid && !userMap.has(eUid)) {
+      userMap.set(eUid, { uid: eUid, points: 0, wins: 0, losses: 0, pushes: 0, picks: 0 });
+    }
+  }
+
+  // Sort: points desc, then wins desc
+  const rows = Array.from(userMap.values()).sort((a, b) =>
+    b.points !== a.points ? b.points - a.points : b.wins - a.wins
+  );
+
+  // Batch-fetch display names from users collection
+  const uids = rows.map(r => r.uid);
+  const nameMap: Map<string, { username?: string; displayName?: string; avatarUrl?: string }> = new Map();
+  const chunks: string[][] = [];
+  for (let i = 0; i < uids.length; i += 30) chunks.push(uids.slice(i, i + 30));
+  for (const chunk of chunks) {
+    const uSnap = await db.collection("users").where(admin.firestore.FieldPath.documentId(), "in", chunk).get();
+    for (const d of uSnap.docs) {
+      const data = d.data() as any;
+      nameMap.set(d.id, { username: data.username, displayName: data.displayName, avatarUrl: data.avatarUrl });
+    }
+  }
+
+  const ranked = rows.map((r, idx) => {
+    const meta = nameMap.get(r.uid) ?? {};
+    return {
+      rank:        idx + 1,
+      uid:         r.uid,
+      username:    meta.username  ?? null,
+      displayName: meta.displayName ?? null,
+      avatarUrl:   meta.avatarUrl ?? null,
+      points:      r.points,
+      wins:        r.wins,
+      losses:      r.losses,
+      pushes:      r.pushes,
+      picks:       r.picks,
+    };
+  });
+
+  return {
+    tournamentId,
+    tournamentTitle: tournament.title ?? "",
+    prizes:          Array.isArray(tournament.prizes) ? tournament.prizes : [],
+    status:          tournament.status ?? "open",
+    weekId:          tournament.weekId ?? "",
+    rows:            ranked,
+  };
+});

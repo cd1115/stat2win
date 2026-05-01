@@ -296,6 +296,20 @@ function DetailContent() {
                       <span className="text-amber-400/60 group-hover:text-amber-300 transition text-sm">→</span>
                     </Link>
                   )}
+                  {/* Leaderboard CTA — always visible for paid users */}
+                  <Link
+                    href={`/tournaments/paid/leaderboard?id=${id}`}
+                    className="flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3 hover:bg-white/[0.04] transition group"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-lg">🏆</span>
+                      <div>
+                        <div className="text-sm font-bold text-white/70">Ver Leaderboard</div>
+                        <div className="text-xs text-white/30">Rankings y premios del torneo</div>
+                      </div>
+                    </div>
+                    <span className="text-white/25 group-hover:text-white/50 transition text-sm">→</span>
+                  </Link>
                 </div>
               )}
               {isRefunded && (
