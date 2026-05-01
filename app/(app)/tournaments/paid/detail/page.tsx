@@ -281,19 +281,19 @@ function DetailContent() {
                     </div>
                   </div>
                   {/* Picks CTA — visible when tournament is active (not finished/cancelled) */}
-                  {(isOpen || t.status === "locked") && !isFinished && !isCancelled && (
+                  {(isOpen || t.status === "locked" || t.status === "running") && !isFinished && !isCancelled && (
                     <Link
-                      href={`/picks?sport=MLB&weekId=${t.weekId}`}
-                      className="flex items-center justify-between rounded-xl border border-blue-400/25 bg-blue-500/8 px-4 py-3 hover:bg-blue-500/12 transition group"
+                      href={`/tournaments/paid/mlb?id=${id}`}
+                      className="flex items-center justify-between rounded-xl border border-amber-400/25 bg-amber-400/8 px-4 py-3 hover:bg-amber-400/12 transition group"
                     >
                       <div className="flex items-center gap-2.5">
                         <span className="text-lg">⚾</span>
                         <div>
-                          <div className="text-sm font-bold text-blue-300">Hacer Picks MLB</div>
-                          <div className="text-xs text-white/35">Tus picks suman puntos en el torneo</div>
+                          <div className="text-sm font-bold text-amber-300">Hacer Picks MLB — Torneo de Pago</div>
+                          <div className="text-xs text-white/35">Picks exclusivos para este torneo en efectivo</div>
                         </div>
                       </div>
-                      <span className="text-blue-400/60 group-hover:text-blue-300 transition text-sm">→</span>
+                      <span className="text-amber-400/60 group-hover:text-amber-300 transition text-sm">→</span>
                     </Link>
                   )}
                 </div>

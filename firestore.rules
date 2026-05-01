@@ -83,5 +83,14 @@ service cloud.firestore {
       allow read: if signedIn() && resource.data.uid == request.auth.uid;
       allow write: if false;
     }
+
+    // ---------------------------
+    // PICKS PAGOS: cada usuario lee sus propios picks de torneos de pago.
+    // Escritura solo desde el servidor (placePaidPick Cloud Function).
+    // ---------------------------
+    match /picks_paid/{pickId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
   }
 }

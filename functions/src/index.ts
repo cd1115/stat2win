@@ -8322,3 +8322,101 @@ export const adminCreateNextWeekPaidMLBTournament = onCall({ cors: true }, async
     openDate: data.openDate.toDate().toISOString(),
   };
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PAID TOURNAMENT PICKS  (stored in picks_paid — separate from RP picks)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export const placePaidPick = onCall({ cors: true }, async (req) => {
+  const uid = requireAuth(req);
+
+  const tournamentId = String(req.data?.tournamentId ?? "").trim();
+  if (!tournamentId) throw new HttpsError("invalid-argument", "tournamentId is required.");
+
+  // Verify paid entry
+  const entrySnap = await db.collection("paid_tournament_entries").doc(`${tournamentId}_${uid}`).get();
+  if (!entrySnap.exists || entrySnap.data()?.paymentStatus !== "paid") {
+    throw new HttpsError("failed-precondition", "Debes estar inscrito y con pago confirmado.");
+  }
+
+  // Load tournament to get sport + weekId
+  const tSnap = await db.collection("paid_tournaments").doc(tournamentId).get();
+  if (!tSnap.exists) throw new HttpsError("not-found", "Tournament not found.");
+  const t = tSnap.data() as any;
+
+  if (t.status === "cancelled" || t.status === "finished") {
+    throw new HttpsError("failed-precondition", `Tournament is ${t.status}.`);
+  }
+
+  const sport   = String(t.sport ?? "MLB").toUpperCase();
+  const weekId  = String(t.weekId ?? "").trim();
+  const clear   = req.data?.clear === true;
+
+  // Market + selection validation
+  const marketRaw = String(req.data?.market ?? "").toLowerCase();
+  const market = (["moneyline","spread","ou"].includes(marketRaw)) ? marketRaw : null;
+  if (!market) throw new HttpsError("invalid-argument", "Invalid market.");
+
+  const selectionRaw = String(req.data?.selection ?? req.data?.pick ?? "").toLowerCase();
+  const selection = (["home","away","over","under","draw"].includes(selectionRaw)) ? selectionRaw : null;
+  if (!selection && !clear) throw new HttpsError("invalid-argument", "Invalid selection.");
+
+  // Find game
+  const gameIdIn    = String(req.data?.gameId ?? "").trim();
+  const gameDocIdIn = String(req.data?.gameDocId ?? "").trim();
+
+  let gameSnap: FirebaseFirestore.DocumentSnapshot | null = null;
+  if (gameDocIdIn) {
+    const s = await db.collection("games").doc(gameDocIdIn).get();
+    if (s.exists) gameSnap = s;
+  }
+  if (!gameSnap && gameIdIn) {
+    const q = await db.collection("games")
+      .where("sport", "==", sport)
+      .where("weekId", "==", weekId)
+      .where("gameId", "==", gameIdIn)
+      .limit(1).get();
+    if (!q.empty) gameSnap = q.docs[0];
+  }
+  if (!gameSnap) throw new HttpsError("not-found", "Game not found.");
+
+  const game       = gameSnap.data() as any;
+  const gameStatus = String(game?.status ?? "").toLowerCase();
+  if (gameStatus === "inprogress" || gameStatus === "final") {
+    throw new HttpsError("failed-precondition", "Picks are locked (game started).");
+  }
+  const startTime = game?.startTime?.toDate?.() ?? null;
+  if (startTime instanceof Date && startTime <= new Date()) {
+    throw new HttpsError("failed-precondition", "Picks are locked (game started).");
+  }
+
+  const gameIdField = String(game?.gameId ?? gameIdIn).trim();
+  const pickId = `${uid}_${tournamentId}_${gameIdField}_${market}`;
+  const pickRef = db.collection("picks_paid").doc(pickId);
+
+  if (clear) {
+    await pickRef.delete().catch(() => {});
+    return { ok: true, cleared: true, pickId };
+  }
+
+  const line = typeof req.data?.line === "number" ? req.data.line : null;
+
+  await pickRef.set({
+    uid,
+    tournamentId,
+    sport,
+    weekId,
+    gameId:    gameIdField,
+    gameDocId: gameSnap.id,
+    market,
+    selection,
+    pick:      selection,
+    line,
+    result:    "pending",
+    pointsAwarded: 0,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  return { ok: true, pickId };
+});
