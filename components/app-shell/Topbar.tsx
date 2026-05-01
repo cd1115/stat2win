@@ -16,6 +16,7 @@ import {
   onSnapshot,
   writeBatch,
   doc,
+  getDoc,
 } from "firebase/firestore";
 
 type NotifType =
@@ -214,6 +215,67 @@ function NotificationBell({ uid }: { uid: string }) {
   );
 }
 
+// ─── ChannelIcon ──────────────────────────────────────────────────────────────
+
+function ChannelIcon({ uid }: { uid: string }) {
+  const router = useRouter();
+  const [unread, setUnread] = useState(0);
+
+  useEffect(() => {
+    // Get user's lastSeenAt
+    async function subscribeWithLastSeen() {
+      let lastSeenMs = 0;
+      try {
+        const snap = await getDoc(doc(db, "channel_last_seen", uid));
+        if (snap.exists()) {
+          const ts = (snap.data() as any).lastSeenAt;
+          lastSeenMs = ts?.toDate?.()?.getTime?.() ?? 0;
+        }
+      } catch {}
+
+      // Listen to recent messages and count how many are newer than lastSeen
+      const q = query(
+        collection(db, "channel_messages"),
+        orderBy("createdAt", "desc"),
+        limit(50),
+      );
+      return onSnapshot(q, snap => {
+        const count = snap.docs.filter(d => {
+          const ts = (d.data() as any).createdAt;
+          const msgMs = ts?.toDate?.()?.getTime?.() ?? 0;
+          return msgMs > lastSeenMs;
+        }).length;
+        setUnread(count);
+      });
+    }
+
+    let unsub: (() => void) | undefined;
+    subscribeWithLastSeen().then(u => { unsub = u; });
+    return () => { unsub?.(); };
+  }, [uid]);
+
+  return (
+    <button
+      onClick={() => router.push("/channel")}
+      className={cn(
+        "relative flex h-9 w-9 items-center justify-center rounded-xl transition",
+        "border border-white/10 bg-white/5 hover:bg-white/10",
+      )}
+      aria-label="Canal"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/70">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      </svg>
+      {unread > 0 && (
+        <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-500 text-[10px] font-black text-white ring-2 ring-[#0A0C10]">
+          {unread > 9 ? "9+" : unread}
+        </span>
+      )}
+    </button>
+  );
+}
+
 // ─── Topbar ───────────────────────────────────────────────────────────────────
 
 export default function Topbar({ title = "Home" }: { title?: string }) {
@@ -284,6 +346,8 @@ export default function Topbar({ title = "Home" }: { title?: string }) {
               </Link>
             </>
           )}
+
+          {user && <ChannelIcon uid={user.uid} />}
 
           {user ? <NotificationBell uid={user.uid} /> : (
             <button className="flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/40">

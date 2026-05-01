@@ -130,5 +130,32 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if false;
     }
+
+    // ---------------------------
+    // CHANNEL MESSAGES: lectura para todos los logueados.
+    // Escritura SOLO para admins (custom claim admin == true).
+    // ---------------------------
+    match /channel_messages/{msgId} {
+      allow read: if signedIn();
+      allow write: if signedIn() && request.auth.token.admin == true;
+    }
+
+    // ---------------------------
+    // CHANNEL REACTIONS: cada usuario lee/escribe su propia reacción.
+    // Lectura abierta para todos (necesario para contar reacciones).
+    // ---------------------------
+    match /channel_reactions/{reactionId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow update: if signedIn() && resource.data.uid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // ---------------------------
+    // CHANNEL LAST SEEN: cada usuario actualiza su propio timestamp.
+    // ---------------------------
+    match /channel_last_seen/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
   }
 }

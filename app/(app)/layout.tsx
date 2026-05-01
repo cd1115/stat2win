@@ -16,6 +16,7 @@ function titleFromPath(pathname: string) {
   if (p.startsWith("/leaderboard"))  return "Leaderboard";
   if (p.startsWith("/store"))        return "Store";
   if (p.startsWith("/redeems"))      return "My Rewards";
+  if (p.startsWith("/channel"))       return "Canal";
   if (p.startsWith("/settings"))     return "Profile";
   if (p.startsWith("/subscription")) return "Subscription";
   if (p.startsWith("/admin"))        return "Admin";

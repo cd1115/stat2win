@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import { doc, onSnapshot, setDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { useUserEntitlements } from "@/lib/useUserEntitlements";
 import { cn } from "@/lib/cn";
@@ -31,6 +31,15 @@ export default function SettingsPage() {
   const [savingAvatar, setSavingAvatar]   = useState(false);
   const { plan, rewardPoints, loading: entLoading, isAdmin } = useUserEntitlements();
   const isPremium = plan === "premium";
+
+  // ── Channel modal state (admin only) ──
+  const [showChannelModal, setShowChannelModal] = useState(false);
+  const [chType, setChType]   = useState<"announcement" | "update" | "info">("announcement");
+  const [chTitle, setChTitle] = useState("");
+  const [chBody, setChBody]   = useState("");
+  const [chPinned, setChPinned] = useState(false);
+  const [chSending, setChSending] = useState(false);
+  const [chSuccess, setChSuccess] = useState(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, u => {
@@ -67,6 +76,33 @@ export default function SettingsPage() {
   async function handleSignOut() {
     await signOut(auth);
     router.replace("/login?from=logout");
+  }
+
+  async function sendChannelMessage() {
+    if (!chTitle.trim() || !chBody.trim()) return;
+    setChSending(true);
+    try {
+      await addDoc(collection(db, "channel_messages"), {
+        type: chType,
+        title: chTitle.trim(),
+        body: chBody.trim(),
+        pinned: chPinned,
+        createdAt: serverTimestamp(),
+        authorUid: uid ?? "",
+      });
+      setChSuccess(true);
+      setChTitle("");
+      setChBody("");
+      setChPinned(false);
+      setTimeout(() => {
+        setChSuccess(false);
+        setShowChannelModal(false);
+      }, 1500);
+    } catch (err) {
+      console.error("Error sending channel message:", err);
+    } finally {
+      setChSending(false);
+    }
   }
 
   const displayName = username || email?.split("@")[0] || "User";
@@ -278,6 +314,144 @@ export default function SettingsPage() {
               </svg>
             </Link>
           ))}
+
+          {/* ── Publicar en Canal ── */}
+          <button
+            onClick={() => setShowChannelModal(true)}
+            className="flex w-full items-center justify-between px-5 py-3.5 hover:bg-blue-500/6 transition-colors border-t border-white/6"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-blue-500/12 border border-blue-500/20 flex items-center justify-center text-sm shrink-0">📣</div>
+              <div>
+                <div className="text-sm font-semibold text-blue-300/90">Publicar en Canal</div>
+                <div className="text-xs text-white/30 mt-0.5">Enviar mensaje a todos los usuarios</div>
+              </div>
+            </div>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-blue-400/40 shrink-0">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {/* ── Channel message modal (admin only) ── */}
+      {showChannelModal && (
+        <div
+          className="fixed inset-0 z-[300] flex items-end justify-center bg-black/60 backdrop-blur-sm pb-safe"
+          onClick={e => { if (e.target === e.currentTarget) setShowChannelModal(false); }}
+        >
+          <div className="w-full max-w-lg rounded-t-3xl border border-white/10 bg-[#0E1117] px-5 pt-5 pb-8 space-y-4">
+
+            {/* Handle bar */}
+            <div className="mx-auto mb-1 h-1 w-10 rounded-full bg-white/15" />
+
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-500/12 border border-blue-500/20 flex items-center justify-center text-base">📣</div>
+                <div>
+                  <div className="text-sm font-bold text-white">Publicar en Canal</div>
+                  <div className="text-[11px] text-white/30">Visible para todos los usuarios</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowChannelModal(false)}
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-white/6 text-white/40 hover:text-white/70 transition text-xs"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Type selector */}
+            <div>
+              <label className="block text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">Tipo</label>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { value: "announcement", label: "📣 Anuncio",       color: "amber" },
+                  { value: "update",       label: "📊 Actualización", color: "blue" },
+                  { value: "info",         label: "⚡ Novedad",       color: "emerald" },
+                ] as const).map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setChType(opt.value)}
+                    className={cn(
+                      "rounded-xl border py-2 text-[11px] font-bold transition",
+                      chType === opt.value
+                        ? opt.color === "amber"   ? "border-amber-400/40 bg-amber-400/12 text-amber-300"
+                          : opt.color === "blue"  ? "border-blue-400/40 bg-blue-400/12 text-blue-300"
+                          :                         "border-emerald-400/40 bg-emerald-400/12 text-emerald-300"
+                        : "border-white/8 bg-white/4 text-white/35 hover:bg-white/8"
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Title */}
+            <div>
+              <label className="block text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">Título</label>
+              <input
+                type="text"
+                value={chTitle}
+                onChange={e => setChTitle(e.target.value)}
+                placeholder="ej. 🏆 NBA Paid Tournament — Mayo 2026"
+                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/25 focus:border-blue-400/40 focus:outline-none focus:ring-1 focus:ring-blue-400/20 transition"
+              />
+            </div>
+
+            {/* Body */}
+            <div>
+              <label className="block text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">Mensaje</label>
+              <textarea
+                value={chBody}
+                onChange={e => setChBody(e.target.value)}
+                rows={5}
+                placeholder={"Escribe el mensaje aquí…\n\nUsa **texto** para negritas."}
+                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/25 focus:border-blue-400/40 focus:outline-none focus:ring-1 focus:ring-blue-400/20 transition resize-none"
+              />
+            </div>
+
+            {/* Pin toggle */}
+            <div className="flex items-center justify-between rounded-xl border border-white/8 bg-white/4 px-4 py-3">
+              <div className="flex items-center gap-2.5">
+                <span className="text-base">📌</span>
+                <div>
+                  <div className="text-sm font-semibold text-white/80">Fijar mensaje</div>
+                  <div className="text-[11px] text-white/30">Aparece siempre al inicio</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setChPinned(v => !v)}
+                className={cn(
+                  "relative inline-flex h-6 w-11 items-center rounded-full border transition-colors",
+                  chPinned ? "bg-amber-500 border-amber-400" : "bg-white/10 border-white/15"
+                )}
+              >
+                <span className={cn(
+                  "inline-block h-4 w-4 rounded-full bg-white shadow transition-transform",
+                  chPinned ? "translate-x-6" : "translate-x-1"
+                )} />
+              </button>
+            </div>
+
+            {/* Send button */}
+            <button
+              onClick={sendChannelMessage}
+              disabled={chSending || chSuccess || !chTitle.trim() || !chBody.trim()}
+              className={cn(
+                "w-full rounded-xl py-3.5 text-sm font-bold transition",
+                chSuccess
+                  ? "border border-emerald-400/30 bg-emerald-500/15 text-emerald-300"
+                  : chTitle.trim() && chBody.trim()
+                  ? "border border-blue-400/30 bg-blue-500/20 text-blue-200 hover:bg-blue-500/28 active:scale-[0.98]"
+                  : "border border-white/8 bg-white/5 text-white/25 cursor-not-allowed"
+              )}
+            >
+              {chSuccess ? "✓ Publicado con éxito" : chSending ? "Publicando…" : "📣 Publicar mensaje"}
+            </button>
+          </div>
         </div>
       )}
 
