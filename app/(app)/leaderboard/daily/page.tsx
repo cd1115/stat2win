@@ -225,73 +225,88 @@ export default function DailyLeaderboardPage() {
 
   return (
     <Protected>
-      <div className="px-4 md:px-8 py-6">
+      <div className="px-3 md:px-6 py-4">
         <div className="mx-auto max-w-3xl">
 
-          {/* ── Header ── */}
-          <div className="mb-5 flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2">
-              <button onClick={() => setDayOffset(v => v - 1)}
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-white/50 hover:bg-white/8 hover:text-white/80 transition text-sm">
-                ←
-              </button>
-              <div className="flex flex-col items-center min-w-[120px]">
-                <span className="text-sm font-bold text-white/80">{activeDayLabel}</span>
-                <span className="text-[10px] text-white/30">{activeDayId}</span>
-              </div>
-              <button onClick={() => setDayOffset(v => Math.min(v + 1, 0))} disabled={isToday}
-                className={["flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-sm transition",
-                  isToday ? "text-white/15 cursor-default" : "text-white/50 hover:bg-white/8 hover:text-white/80"].join(" ")}>
-                →
-              </button>
+          {/* ── Page title ── */}
+          <div className="mb-4">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/25 bg-amber-400/8 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-amber-300">
+                <span className={["inline-flex h-1.5 w-1.5 rounded-full", isToday ? "bg-amber-400 animate-pulse" : "bg-white/30"].join(" ")} />
+                {isToday ? "Live" : "Histórico"}
+              </span>
             </div>
+            <h1 className="text-2xl font-black tracking-tight text-white">Daily Leaderboard</h1>
+          </div>
 
-            {isToday ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/25 bg-amber-400/8 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-amber-300">
-                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-                Live
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-white/35">
-                Histórico
-              </span>
-            )}
-
-            <div className="ml-auto flex items-center gap-2">
-              <input value={qText} onChange={e => setQText(e.target.value)} placeholder="Buscar..."
-                className="w-36 rounded-xl border border-white/10 bg-black/30 px-3 py-1.5 text-sm text-white placeholder:text-white/25 outline-none focus:border-white/20" />
+          {/* ── Day navigator ── */}
+          <div className="mb-4 flex items-center justify-between rounded-2xl border border-white/8 bg-white/[0.02] px-2 py-1.5">
+            <button onClick={() => setDayOffset(v => v - 1)}
+              className="flex h-8 w-8 items-center justify-center rounded-xl text-white/40 hover:bg-white/8 hover:text-white transition">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <div className="flex flex-col items-center gap-0.5">
+              <span className="text-[10px] text-white/30 uppercase tracking-wider">{activeDayId}</span>
+              <span className="text-sm font-semibold text-white">{activeDayLabel}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              {dayOffset !== 0 && (
+                <button onClick={() => setDayOffset(0)} className="rounded-lg px-2.5 py-1 text-xs text-white/35 hover:bg-white/8 hover:text-white/60 transition">Hoy</button>
+              )}
+              <button onClick={() => setDayOffset(v => Math.min(v + 1, 0))} disabled={isToday}
+                className={["flex h-8 w-8 items-center justify-center rounded-xl transition",
+                  isToday ? "text-white/15 cursor-default" : "text-white/40 hover:bg-white/8 hover:text-white"].join(" ")}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
             </div>
           </div>
 
-          {/* ── Sport pills + nav ── */}
-          <div className="mb-5 flex flex-wrap items-center gap-2">
-            {TABS.map(s => {
-              const c = SPORT_CONFIG[s];
-              const active = sport === s;
-              return (
-                <button key={s} onClick={() => setSport(s)}
-                  className={[
-                    "rounded-full border px-4 py-1.5 text-xs font-bold uppercase tracking-wider transition",
-                    active ? `${c.activeBg} ${c.color} ${c.border}` : "border-white/10 bg-white/[0.03] text-white/45 hover:text-white/70 hover:bg-white/8",
-                  ].join(" ")}>
-                  {s === "MIXED" ? "🏆 Mixed" : s}
-                </button>
-              );
-            })}
-            {!isPremium && (
-              <Link href="/subscription"
-                className="flex items-center gap-1.5 rounded-full border border-violet-400/15 bg-violet-500/5 px-4 py-1.5 text-xs text-violet-400/60 transition hover:text-violet-300">
-                🏆 Mixed <span className="rounded-full bg-amber-400/10 border border-amber-400/20 px-1.5 text-[9px] font-bold text-amber-300/70 uppercase">PRO</span>
-              </Link>
-            )}
-            <div className="ml-auto flex items-center gap-2">
+          {/* ── Sport selector + Weekly links + Search ── */}
+          <div className="mb-4 flex flex-col gap-3">
+            {/* Sport tabs */}
+            <div className="flex items-center gap-2">
+              {/* Segmented control for daily sports */}
+              <div className="flex rounded-xl border border-white/10 bg-black/20 p-1 gap-1">
+                {TABS.map(s => {
+                  const c = SPORT_CONFIG[s];
+                  const active = sport === s;
+                  return (
+                    <button key={s} onClick={() => setSport(s)}
+                      className={[
+                        "rounded-lg px-4 py-1.5 text-xs font-bold tracking-wide transition",
+                        active ? `${c.activeBg} ${c.color} shadow-sm` : "text-white/40 hover:text-white/70",
+                      ].join(" ")}>
+                      {s === "MIXED" ? "🏆 Mixed" : s}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {!isPremium && (
+                <Link href="/subscription"
+                  className="flex items-center gap-1.5 rounded-xl border border-violet-400/15 bg-violet-500/5 px-3 py-1.5 text-xs text-violet-400/60 hover:text-violet-300 hover:bg-violet-500/10 transition">
+                  🏆 Mixed
+                  <span className="rounded-full bg-amber-400/10 border border-amber-400/20 px-1.5 py-px text-[8px] font-black text-amber-300/70 uppercase tracking-wider">PRO</span>
+                </Link>
+              )}
+
+              {/* Search — right side */}
+              <div className="ml-auto">
+                <input value={qText} onChange={e => setQText(e.target.value)} placeholder="Buscar…"
+                  className="w-28 rounded-xl border border-white/10 bg-black/30 px-3 py-1.5 text-xs text-white placeholder:text-white/25 outline-none focus:border-white/20" />
+              </div>
+            </div>
+
+            {/* Weekly leaderboard links */}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-white/25 uppercase tracking-wider">Semana →</span>
               <Link href="/leaderboard/nba"
-                className="rounded-full border border-white/8 bg-white/[0.03] px-3 py-1.5 text-[11px] text-white/40 hover:text-white/70 transition">
-                NBA Weekly
+                className="flex items-center gap-1.5 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-1.5 text-[11px] font-semibold text-white/45 hover:bg-white/8 hover:text-white/80 transition">
+                🏀 NBA Weekly
               </Link>
               <Link href="/leaderboard/mlb"
-                className="rounded-full border border-white/8 bg-white/[0.03] px-3 py-1.5 text-[11px] text-white/40 hover:text-white/70 transition">
-                MLB Weekly
+                className="flex items-center gap-1.5 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-1.5 text-[11px] font-semibold text-white/45 hover:bg-white/8 hover:text-white/80 transition">
+                ⚾ MLB Weekly
               </Link>
             </div>
           </div>

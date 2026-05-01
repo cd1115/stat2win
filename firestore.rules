@@ -94,11 +94,12 @@ service cloud.firestore {
     }
 
     // ---------------------------
-    // DAILY PICKS: cada usuario lee sus propios picks del torneo diario.
+    // DAILY PICKS: lectura para todos los usuarios logueados.
+    // (necesario para que el leaderboard diario pueda agregar picks de todos los usuarios)
     // Escritura solo desde el servidor (placeDailyPick Cloud Function).
     // ---------------------------
     match /picks_daily/{pickId} {
-      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow read: if signedIn();
       allow write: if false;
     }
 
