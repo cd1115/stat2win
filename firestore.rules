@@ -92,5 +92,42 @@ service cloud.firestore {
       allow read: if signedIn() && resource.data.uid == request.auth.uid;
       allow write: if false;
     }
+
+    // ---------------------------
+    // DAILY PICKS: cada usuario lee sus propios picks del torneo diario.
+    // Escritura solo desde el servidor (placeDailyPick Cloud Function).
+    // ---------------------------
+    match /picks_daily/{pickId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
+
+    // ---------------------------
+    // TOURNAMENT REGISTRATIONS: cada usuario lee su propia inscripción al torneo diario.
+    // Escritura solo desde el servidor (joinDailyTournament Cloud Function).
+    // ---------------------------
+    match /tournament_registrations/{regId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
+
+    // ---------------------------
+    // PLAYER PROPS (Mixed Tournament): lectura para logueados.
+    // Escritura solo desde el servidor.
+    // ---------------------------
+    match /player_props_games/{docId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /player_prop_picks/{pickId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /player_props_leaderboard/{docId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
   }
 }
